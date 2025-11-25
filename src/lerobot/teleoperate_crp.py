@@ -76,6 +76,7 @@ from lerobot.robots import (  # noqa: F401
     make_robot_from_config,
     so100_follower,
     so101_follower,
+    crp_arm, #添加CRP_Arm
 )
 from lerobot.teleoperators import (  # noqa: F401
     Teleoperator,
@@ -92,6 +93,8 @@ from lerobot.utils.robot_utils import busy_wait
 from lerobot.utils.utils import init_logging, move_cursor_up
 from lerobot.utils.visualization_utils import _init_rerun, log_rerun_data
 
+from .tools import forward_kinematics
+
 
 @dataclass
 class TeleoperateConfig:
@@ -105,7 +108,7 @@ class TeleoperateConfig:
     display_data: bool = False
 
 
-def teleop_loop(
+def teleop_loop_crp(
     teleop: Teleoperator,
     robot: Robot,
     fps: int,
@@ -131,6 +134,21 @@ def teleop_loop(
         robot_observation_processor: An optional pipeline to process raw observations from the robot.
     """
 
+    """
+    此函数持续从遥操作设备读取动作，通过可选的处理流程进行处理，将动作发送给机器人，
+    并可选择显示机器人状态。该循环以指定频率运行，直至达到设定持续时间或被手动中断。
+
+    参数:
+        teleop: 提供控制动作的遥操作设备实例
+        robot: 被控制的机器人实例
+        fps: 控制循环的目标频率（帧每秒）
+        display_data: 如果为True,则获取机器人观测数据并在控制台和Rerun中显示
+        duration: 遥操作循环的最大持续时间seconds。如果为None,则循环无限运行
+        teleop_action_processor: 用于处理遥操作设备原始动作的可选处理流程
+        robot_action_processor: 用于在发送给机器人前处理动作的可选处理流程
+        robot_observation_processor: 用于处理机器人原始观测数据的可选处理流程
+    """
+
     display_len = max(len(key) for key in robot.action_features)
     start = time.perf_counter()
 
@@ -152,12 +170,8 @@ def teleop_loop(
         # Process action for robot through pipeline
         robot_action_to_send = robot_action_processor((teleop_action, obs))
 
-        # print(robot_action_to_send)
-
         # Send processed action to robot (robot_action_processor.to_output should return dict[str, Any])
-        sendA = robot.send_action(robot_action_to_send)
-
-        # print(sendA)
+        _ = robot.send_action(robot_action_to_send)
 
         if display_data:
             # Process robot observation through pipeline
@@ -199,7 +213,7 @@ def teleoperate(cfg: TeleoperateConfig):
     robot.connect()
 
     try:
-        teleop_loop(
+        teleop_loop_crp(
             teleop=teleop,
             robot=robot,
             fps=cfg.fps,
