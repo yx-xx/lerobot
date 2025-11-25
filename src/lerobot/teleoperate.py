@@ -154,11 +154,12 @@ def teleop_loop(
         # Process action for robot through pipeline
         robot_action_to_send = robot_action_processor((teleop_action, obs))
 
+
+
+
         # print(robot_action_to_send)
 
-
-
-        #添加获取末端位置代码
+        # 添加获取末端位置代码
         _ = get_so101_endpose(robot_action_to_send)
 
 

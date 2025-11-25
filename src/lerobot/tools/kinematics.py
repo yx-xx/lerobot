@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.spatial.transform import Rotation as R
-
+import copy
 
 def create_so101_dh_params():
     """[a, alpha, d, theta]"""
@@ -14,6 +14,15 @@ def create_so101_dh_params():
 
 def create_tool_transform():
     """5Ttool"""
+    return np.array([
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0]
+    ])
+
+def create_base_transform():
+    """so101_DH_to_CRPArm"""
     return np.array([
         [1.0, 0.0, 0.0, 0.0],
         [0.0, 1.0, 0.0, 0.0],
@@ -45,6 +54,8 @@ def map_range(value: float, input_min: float, input_max: float, output_min: floa
 
 def so101_to_radian(action: dict[str, float]) -> list:
 
+    action = copy.deepcopy(action)
+
     for key in action:
         action[key] = -action[key]
 
@@ -67,13 +78,12 @@ def so101_to_radian(action: dict[str, float]) -> list:
             input_min, input_max, output_min, output_max = ranges[key]
             action_in_radian[key] = map_range(value, input_min, input_max, output_min, output_max)
     
-    # 返回一个包含所有映射后角度的 NumPy 向量
+    # 返回一个包含所有映射后角度
     return [action_in_radian[key] for key in action_in_radian]
 
 
-def forward_kinematics(joint_angles):
+def forward_kinematics_so101(joint_angles: list[float]) -> list[float]:
     """
-    正运动学
     输入: joint_angles - 长度为5的关节角度列表
     输出: [x, y, z, roll, pitch, yaw] - 末端位姿
     """
@@ -108,11 +118,59 @@ def forward_kinematics(joint_angles):
     
     print("末端位置 (X, Y, Z):", x, y, z)
 
-    return np.round([x, y, z, roll, pitch, yaw], 3)
+    return np.round([x, y, z, roll, pitch, yaw], 3).tolist()
+
+
+def forward_kinematics(joint_angles: list[float]) -> list[float]:
+    """
+    输入: joint_angles - 长度为5的关节角度列表
+    输出: [x, y, z, roll, pitch, yaw] - 末端位姿
+    """
+    if len(joint_angles) != 5:
+        raise ValueError("SO101需要5个关节角度")
+    
+    dh_params = create_so101_dh_params()
+    for i in range(5):
+        dh_params[i][3] = float(dh_params[i][3] + joint_angles[i])
+
+    # 计算各关节变换矩阵
+    T1 = dh_transform(*dh_params[0])
+    T2 = dh_transform(*dh_params[1])
+    T3 = dh_transform(*dh_params[2])
+    T4 = dh_transform(*dh_params[3])
+    T5 = dh_transform(*dh_params[4])
+    
+    Ttool = create_tool_transform()
+    Tbase = create_base_transform()
+
+    # 总变换矩阵（基座到末端）
+    T_total = Tbase @ T1 @ T2 @ T3 @ T4 @ T5 @ Ttool
+
+    # print(T_total)
+    # print(T1 @ T2)
+
+    # 提取位置和姿态
+    x, y, z = T_total[0, 3], T_total[1, 3], T_total[2, 3]
+    rotation_matrix = T_total[:3, :3]
+    rot_obj = R.from_matrix(rotation_matrix)
+    
+    roll, pitch, yaw = rot_obj.as_euler('xyz', degrees=False)
+    
+    print("末端位置 (X, Y, Z):", x, y, z)
+
+    return np.round([x, y, z, roll, pitch, yaw], 3).tolist()
+
 
 
 def get_so101_endpose(action: dict[str, float]):
-    joints_radian = so101_to_radian(action)
+    action_copy = copy.deepcopy(action)
+    joints_radian = so101_to_radian(action_copy)
+    return forward_kinematics_so101(joints_radian[:5])
+
+
+def get_endpose2Crp(action: dict[str, float]):
+    action_copy = copy.deepcopy(action)
+    joints_radian = so101_to_radian(action_copy)
     return forward_kinematics(joints_radian[:5])
 
 
@@ -123,6 +181,9 @@ if __name__ == "__main__":
     # end_pose = forward_kinematics(test_joints)
     # print("末端位置 (X, Y, Z):", end_pose[:3])
     # print("末端姿态 (roll, pitch, yaw):", end_pose[3:])
+
+
+
 
     dict = {'shoulder_pan.pos': -9.344082081348475, 
             'shoulder_lift.pos': -29.158025715470757, 
