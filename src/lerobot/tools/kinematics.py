@@ -116,18 +116,19 @@ def forward_kinematics_so101(joint_angles: list[float]) -> list[float]:
     
     roll, pitch, yaw = rot_obj.as_euler('xyz', degrees=False)
     
-    print("末端位置 (X, Y, Z):", x, y, z)
+    # print("末端位置 (X, Y, Z):", x, y, z)
 
-    return np.round([x, y, z, roll, pitch, yaw], 3).tolist()
+    return np.round([x, y, z, roll, pitch, yaw], 10).tolist()
 
 
 def forward_kinematics(joint_angles: list[float]) -> list[float]:
     """
+    获取so101末端位姿,并准换到CrpArmBase坐标系下
     输入: joint_angles - 长度为5的关节角度列表
     输出: [x, y, z, roll, pitch, yaw] - 末端位姿
     """
     if len(joint_angles) != 5:
-        raise ValueError("SO101需要5个关节角度")
+        raise ValueError("需要5个关节角度")
     
     dh_params = create_so101_dh_params()
     for i in range(5):
@@ -156,10 +157,28 @@ def forward_kinematics(joint_angles: list[float]) -> list[float]:
     
     roll, pitch, yaw = rot_obj.as_euler('xyz', degrees=False)
     
-    print("末端位置 (X, Y, Z):", x, y, z)
+    # print("末端位置 (X, Y, Z):", x, y, z)
+    # print("末端姿态 (roll, pitch, yaw):", roll, pitch, yaw)
 
-    return np.round([x, y, z, roll, pitch, yaw], 3).tolist()
+    return np.round([x, y, z, roll, pitch, yaw], 10).tolist()
 
+
+def scale_position(end_pose: list[float]) -> list[float]:
+    """
+    输入: end_pose - [x, y, z, roll, pitch, yaw] 格式的末端位姿列表
+    输出: [x', y', z', roll, pitch, yaw] - 缩放后的位置和原始姿态
+    """
+    if len(end_pose) != 6:
+        raise ValueError("输入的末端位姿必须包含6个元素")
+    # 分离位置和姿态
+    x, y, z = end_pose[:3]
+    roll, pitch, yaw = end_pose[3:]
+    # 缩放位置
+    x_scaled = x * 3
+    y_scaled = y * 3
+    z_scaled = z * 3
+    # 返回缩放后的位置和原始的姿态
+    return [x_scaled, y_scaled, z_scaled, roll, pitch, yaw]
 
 
 def get_so101_endpose(action: dict[str, float]):
@@ -171,7 +190,7 @@ def get_so101_endpose(action: dict[str, float]):
 def get_endpose2Crp(action: dict[str, float]):
     action_copy = copy.deepcopy(action)
     joints_radian = so101_to_radian(action_copy)
-    return forward_kinematics(joints_radian[:5])
+    return scale_position(forward_kinematics(joints_radian[:5]))
 
 
 
@@ -184,7 +203,6 @@ if __name__ == "__main__":
 
 
 
-
     dict = {'shoulder_pan.pos': -9.344082081348475, 
             'shoulder_lift.pos': -29.158025715470757, 
             'elbow_flex.pos': 72.99729972997301, 
@@ -192,6 +210,7 @@ if __name__ == "__main__":
             'wrist_roll.pos': 11.040645719227456, 
             'gripper.pos': 1.7651573292402147}
     
-    _ = get_so101_endpose(dict)
+    # _ = get_so101_endpose(dict)
 
-
+    A = get_endpose2Crp(dict)
+    print(A)
