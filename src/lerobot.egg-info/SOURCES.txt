@@ -13,6 +13,7 @@ src/lerobot/record.py
 src/lerobot/replay.py
 src/lerobot/setup_motors.py
 src/lerobot/teleoperate.py
+src/lerobot/teleoperate_crp.py
 src/lerobot.egg-info/PKG-INFO
 src/lerobot.egg-info/SOURCES.txt
 src/lerobot.egg-info/dependency_links.txt
@@ -136,6 +137,9 @@ src/lerobot/robots/utils.py
 src/lerobot/robots/bi_so100_follower/__init__.py
 src/lerobot/robots/bi_so100_follower/bi_so100_follower.py
 src/lerobot/robots/bi_so100_follower/config_bi_so100_follower.py
+src/lerobot/robots/crp_arm/__init__.py
+src/lerobot/robots/crp_arm/config_crp_arm.py
+src/lerobot/robots/crp_arm/crp_arm.py
 src/lerobot/robots/hope_jr/__init__.py
 src/lerobot/robots/hope_jr/config_hope_jr.py
 src/lerobot/robots/hope_jr/hope_jr_arm.py
@@ -223,6 +227,8 @@ src/lerobot/teleoperators/widowx/__init__.py
 src/lerobot/teleoperators/widowx/config_widowx.py
 src/lerobot/teleoperators/widowx/widowx.py
 src/lerobot/templates/lerobot_modelcard_template.md
+src/lerobot/tools/__init__.py
+src/lerobot/tools/kinematics.py
 src/lerobot/transport/services_pb2.py
 src/lerobot/transport/services_pb2_grpc.py
 src/lerobot/transport/utils.py
