@@ -92,6 +92,8 @@ from lerobot.utils.robot_utils import busy_wait
 from lerobot.utils.utils import init_logging, move_cursor_up
 from lerobot.utils.visualization_utils import _init_rerun, log_rerun_data
 
+from .tools import get_so101_endpose
+
 
 @dataclass
 class TeleoperateConfig:
@@ -153,6 +155,13 @@ def teleop_loop(
         robot_action_to_send = robot_action_processor((teleop_action, obs))
 
         # print(robot_action_to_send)
+
+
+
+        #添加获取末端位置代码
+        _ = get_so101_endpose(robot_action_to_send)
+
+
 
         # Send processed action to robot (robot_action_processor.to_output should return dict[str, Any])
         sendA = robot.send_action(robot_action_to_send)
