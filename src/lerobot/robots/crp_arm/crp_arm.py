@@ -276,7 +276,7 @@ class CRPArm(Robot):
 
 
 
-    # 但前获取值为0.0
+    # 当前获取值为0.0
     def get_observation(self) -> dict[str, Any]:
         if not self.is_connected:
             raise DeviceNotConnectedError(f"{self} is not connected.")
