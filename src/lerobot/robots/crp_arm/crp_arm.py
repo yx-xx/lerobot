@@ -162,7 +162,7 @@ class CRPArm(Robot):
         #         "Mismatch between calibration values in the motor and the calibration file or no calibration file found"
         #     )
         #     self.calibrate()
-        
+
         self.crp_arm_robot.connect(self.config_class.ip)
 
         for cam in self.cameras.values():
@@ -338,6 +338,7 @@ class CRPArm(Robot):
         # # Send goal position to the arm
         # self.bus.sync_write("Goal_Position", goal_pos)
         return {f"{motor}.pos": val for motor, val in goal_pos.items()}
+    
     
     def send_endpose(self, endpose: list[float]) -> dict[str, Any]:
         pass
