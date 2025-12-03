@@ -31,6 +31,11 @@ from ..robot import Robot
 from ..utils import ensure_safe_goal_position
 from .config_crp_arm import CRPArmConfig
 
+
+# import the CrpRobotPy
+from CrpRobotPy import CrpRobotPy, RobotMode, CoordinateSystem
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,7 +47,7 @@ class CRPArm(Robot):
     def __init__(self, config: CRPArmConfig):
         super().__init__(config)
         self.config = config
-        norm_mode_body = MotorNormMode.DEGREES if config.use_degrees else MotorNormMode.RANGE_M100_100
+        # norm_mode_body = MotorNormMode.DEGREES if config.use_degrees else MotorNormMode.RANGE_M100_100
 
         # # 设置电机
         # self.bus = FeetechMotorsBus(
@@ -58,6 +63,9 @@ class CRPArm(Robot):
         #     },
         #     calibration=self.calibration,
         # )
+
+        # self.robot = CrpRobotPy.CrpRobotPy()
+        self.crp_arm_robot = CrpRobotPy()
 
         self.crp_joints = {    
         "joint_1": float,
@@ -139,8 +147,7 @@ class CRPArm(Robot):
 
     @property
     def is_connected(self) -> bool:
-        #return self.bus.is_connected and all(cam.is_connected for cam in self.cameras.values())
-        return True
+        return self.crp_arm_robot.is_connected and all(cam.is_connected for cam in self.cameras.values())
 
     def connect(self, calibrate: bool = True) -> None:
         """
@@ -149,13 +156,14 @@ class CRPArm(Robot):
         """
         if self.is_connected:
             raise DeviceAlreadyConnectedError(f"{self} already connected")
-
         # self.bus.connect() #连接电机
         # if not self.is_calibrated and calibrate:
         #     logger.info(
         #         "Mismatch between calibration values in the motor and the calibration file or no calibration file found"
         #     )
         #     self.calibrate()
+        
+        self.crp_arm_robot.connect(self.config_class.ip)
 
         for cam in self.cameras.values():
             cam.connect()
@@ -166,12 +174,16 @@ class CRPArm(Robot):
     def disconnect(self):
         if not self.is_connected:
             raise DeviceNotConnectedError(f"{self} is not connected.")
-
         # self.bus.disconnect(self.config.disable_torque_on_disconnect)  #断连电机
+
+        self.crp_arm_robot.disconnect()
+
         for cam in self.cameras.values():
             cam.disconnect()
 
         logger.info(f"{self} disconnected.")
+
+
 
 
 
@@ -212,15 +224,6 @@ class CRPArm(Robot):
     #         input(f"Connect the controller board to the '{motor}' motor only and press enter.")
     #         self.bus.setup_motor(motor)
     #         print(f"'{motor}' motor id set to {self.bus.motors[motor].id}")
-
-
-
-
-
-
-
-
-
 
     # def get_observation(self) -> dict[str, Any]:
     #     if not self.is_connected:
@@ -273,10 +276,6 @@ class CRPArm(Robot):
     #     return {f"{motor}.pos": val for motor, val in goal_pos.items()}
 
 
-
-
-
-    # 当前获取值为0.0
     def get_observation(self) -> dict[str, Any]:
         if not self.is_connected:
             raise DeviceNotConnectedError(f"{self} is not connected.")

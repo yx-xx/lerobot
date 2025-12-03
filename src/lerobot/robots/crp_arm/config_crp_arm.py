@@ -27,6 +27,8 @@ class CRPArmConfig(RobotConfig):
     # Port to connect to the arm
     port: str
 
+    ip: str = "192.168.0.100"
+    
     disable_torque_on_disconnect: bool = True
 
     # `max_relative_target` limits the magnitude of the relative positional target vector for safety purposes.
