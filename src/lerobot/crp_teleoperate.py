@@ -93,6 +93,10 @@ from lerobot.utils.robot_utils import busy_wait
 from lerobot.utils.utils import init_logging, move_cursor_up
 from lerobot.utils.visualization_utils import _init_rerun, log_rerun_data
 
+from .tools import load_CrpRobotPy,get_endpose2Crp
+load_CrpRobotPy()
+from CrpRobotPy import CrpRobotPy, RobotMode
+
 
 @dataclass
 class TeleoperateConfig:

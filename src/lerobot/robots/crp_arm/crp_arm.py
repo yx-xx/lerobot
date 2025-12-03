@@ -285,6 +285,10 @@ class CRPArm(Robot):
 
         # obs_dict = self.bus.sync_read("Present_Position")
         # obs_dict = {f"{motor}.pos": val for motor, val in obs_dict.items()}
+
+        #############################################################################
+        end_pose = self.crp_arm_robot.read_end_pose()
+
         obs_dict = {    
         "joint_1": 0.0,
         "joint_2": 0.0, 
@@ -339,6 +343,6 @@ class CRPArm(Robot):
         # self.bus.sync_write("Goal_Position", goal_pos)
         return {f"{motor}.pos": val for motor, val in goal_pos.items()}
     
-    
+
     def send_endpose(self, endpose: list[float]) -> dict[str, Any]:
         pass
