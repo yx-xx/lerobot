@@ -6,6 +6,7 @@ src/lerobot/__init__.py
 src/lerobot/__version__.py
 src/lerobot/calibrate.py
 src/lerobot/constants.py
+src/lerobot/crp_teleoperate.py
 src/lerobot/errors.py
 src/lerobot/find_cameras.py
 src/lerobot/find_port.py
@@ -13,7 +14,6 @@ src/lerobot/record.py
 src/lerobot/replay.py
 src/lerobot/setup_motors.py
 src/lerobot/teleoperate.py
-src/lerobot/teleoperate_crp.py
 src/lerobot.egg-info/PKG-INFO
 src/lerobot.egg-info/SOURCES.txt
 src/lerobot.egg-info/dependency_links.txt
@@ -229,6 +229,7 @@ src/lerobot/teleoperators/widowx/widowx.py
 src/lerobot/templates/lerobot_modelcard_template.md
 src/lerobot/tools/__init__.py
 src/lerobot/tools/kinematics.py
+src/lerobot/tools/lib_loader.py
 src/lerobot/transport/services_pb2.py
 src/lerobot/transport/services_pb2_grpc.py
 src/lerobot/transport/utils.py

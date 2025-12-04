@@ -58,6 +58,10 @@ from pprint import pformat
 
 import rerun as rr
 
+from .tools import load_CrpRobotPy, get_endpose2Crp, get_so101_endpose
+load_CrpRobotPy()
+# from CrpRobotPy import CrpRobotPy, RobotMode
+
 from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig  # noqa: F401
 from lerobot.cameras.realsense.configuration_realsense import RealSenseCameraConfig  # noqa: F401
 from lerobot.configs import parser
@@ -92,10 +96,6 @@ from lerobot.teleoperators import (  # noqa: F401
 from lerobot.utils.robot_utils import busy_wait
 from lerobot.utils.utils import init_logging, move_cursor_up
 from lerobot.utils.visualization_utils import _init_rerun, log_rerun_data
-
-from .tools import load_CrpRobotPy,get_endpose2Crp
-load_CrpRobotPy()
-from CrpRobotPy import CrpRobotPy, RobotMode
 
 
 @dataclass
@@ -136,21 +136,6 @@ def teleop_loop_crp(
         robot_observation_processor: An optional pipeline to process raw observations from the robot.
     """
 
-    """
-    此函数持续从遥操作设备读取动作，通过可选的处理流程进行处理，将动作发送给机器人，
-    并可选择显示机器人状态。该循环以指定频率运行，直至达到设定持续时间或被手动中断。
-
-    参数:
-        teleop: 提供控制动作的遥操作设备实例
-        robot: 被控制的机器人实例
-        fps: 控制循环的目标频率（帧每秒）
-        display_data: 如果为True,则获取机器人观测数据并在控制台和Rerun中显示
-        duration: 遥操作循环的最大持续时间seconds。如果为None,则循环无限运行
-        teleop_action_processor: 用于处理遥操作设备原始动作的可选处理流程
-        robot_action_processor: 用于在发送给机器人前处理动作的可选处理流程
-        robot_observation_processor: 用于处理机器人原始观测数据的可选处理流程
-    """
-
     display_len = max(len(key) for key in robot.action_features)
     start = time.perf_counter()
 
@@ -172,8 +157,16 @@ def teleop_loop_crp(
         # Process action for robot through pipeline
         robot_action_to_send = robot_action_processor((teleop_action, obs))
 
-        # Send processed action to robot (robot_action_processor.to_output should return dict[str, Any])
-        _ = robot.send_action(robot_action_to_send)
+        ###### 添加获取末端位置代码
+        crp_endpose = get_so101_endpose(robot_action_to_send)
+        print(f"crp_endpose: {crp_endpose}")
+
+        # # Send processed action to robot (robot_action_processor.to_output should return dict[str, Any])
+        # _ = robot.send_action(robot_action_to_send)
+
+        # ###### 发送末端位置到CRP机械臂
+        # _ = robot.send_endpose(crp_endpose)
+
 
         if display_data:
             # Process robot observation through pipeline

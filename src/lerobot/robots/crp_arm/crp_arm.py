@@ -74,7 +74,6 @@ class CRPArm(Robot):
         "joint_4": float,
         "joint_5": float,
         "joint_6": float,
-        "grasper": float
         }
 
         self.cameras = make_cameras_from_configs(config.cameras)
@@ -164,6 +163,8 @@ class CRPArm(Robot):
         #     self.calibrate()
 
         self.crp_arm_robot.connect(self.config_class.ip)
+        self.crp_arm_robot.servo_power_on()
+        self.crp_arm_robot.switch_work_mode(RobotMode.Manual)
 
         for cam in self.cameras.values():
             cam.connect()
@@ -176,13 +177,13 @@ class CRPArm(Robot):
             raise DeviceNotConnectedError(f"{self} is not connected.")
         # self.bus.disconnect(self.config.disable_torque_on_disconnect)  #断连电机
 
+        self.crp_arm_robot.servo_power_off()
         self.crp_arm_robot.disconnect()
 
         for cam in self.cameras.values():
             cam.disconnect()
 
         logger.info(f"{self} disconnected.")
-
 
 
 
@@ -286,19 +287,9 @@ class CRPArm(Robot):
         # obs_dict = self.bus.sync_read("Present_Position")
         # obs_dict = {f"{motor}.pos": val for motor, val in obs_dict.items()}
 
-        #############################################################################
-        end_pose = self.crp_arm_robot.read_end_pose()
+        crp_joints_dict = self.crp_arm_robot.read_joints()
 
-        obs_dict = {    
-        "joint_1": 0.0,
-        "joint_2": 0.0, 
-        "joint_3": 0.0,
-        "joint_4": 0.0,
-        "joint_5": 0.0,
-        "joint_6": 0.0,
-        "grasper": 0.0
-        }
-        obs_dict = {f"{motor}.pos": val for motor, val in obs_dict.items()}
+        obs_dict = {f"{motor}.pos": val for motor, val in crp_joints_dict.items()}
 
         dt_ms = (time.perf_counter() - start) * 1e3
         logger.debug(f"{self} read state: {dt_ms:.1f}ms")
@@ -313,7 +304,7 @@ class CRPArm(Robot):
         return obs_dict
 
 
-    # 不发送任何数值
+    # 暂时不用
     def send_action(self, action: dict[str, Any]) -> dict[str, Any]:
         """Command arm to move to a target joint configuration.
 
@@ -344,5 +335,11 @@ class CRPArm(Robot):
         return {f"{motor}.pos": val for motor, val in goal_pos.items()}
     
 
-    def send_endpose(self, endpose: list[float]) -> dict[str, Any]:
-        pass
+    def send_endpose(self, endpose: list[float]):
+        if len(endpose) != 6:
+            print("crp_arm: [ERROR] endpose必须包含6个值")
+            return
+        try:
+            _ = self.crp_arm_robot.movel_user(endpose,10000)
+        except Exception as e:
+            print("crp_arm: [ERROR] movel_user机械臂运动失败", e)

@@ -10,7 +10,7 @@ def load_CrpRobotPy(third_party_root=None):
     返回 (crp_pkg_path, lib_dir)
     """
     if third_party_root is None:
-        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
         third_party_root = os.path.join(repo_root, "third_party")
 
     crp_pkg_path = os.path.join(third_party_root, "CrpRobotPy")
@@ -22,28 +22,11 @@ def load_CrpRobotPy(third_party_root=None):
     if lib_dir not in old_ld.split(":"):
         os.environ["LD_LIBRARY_PATH"] = f"{lib_dir}:{old_ld}" if old_ld else lib_dir
 
-    # try:
-    #     helper_so = os.path.join(lib_dir, "libRobotService.so")
-    #     if os.path.exists(helper_so):
-    #         ctypes.CDLL(helper_so)
-    #         print(f"成功加载 {helper_so}")
-    # except OSError:
-    #     pass
-
-    # try:
-    #     helper_so = os.path.join(lib_dir, "CrpRobotPy.so")
-    #     if os.path.exists(helper_so):
-    #         ctypes.CDLL(helper_so)
-    #         print(f"成功加载 {helper_so}")
-    # except OSError:
-    #     pass
-
     for name in ("libRobotService.so", "CrpRobotPy.so"):
         helper_so = os.path.join(lib_dir, name)
         try:
             if os.path.exists(helper_so):
                 ctypes.CDLL(helper_so)
-                print(f"成功加载 {helper_so}")
         except OSError:
             pass
 
