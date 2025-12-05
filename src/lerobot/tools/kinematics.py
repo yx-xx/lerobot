@@ -13,7 +13,14 @@ def create_so101_dh_params():
     ]
 
 def create_tool_transform():
-    """5Ttool"""
+    """Ttool"""
+    # return np.array([
+    #     [1.0, 0.0, 0.0, 0.0],
+    #     [0.0, -1.0, 0.0, 0.0],
+    #     [0.0, 0.0, -1.0, 0.0],
+    #     [0.0, 0.0, 0.0, 1.0]
+    # ])
+
     return np.array([
         [1.0, 0.0, 0.0, 0.0],
         [0.0, 1.0, 0.0, 0.0],
@@ -100,11 +107,10 @@ def forward_kinematics_so101(joint_angles: list[float]) -> list[float]:
     T3 = dh_transform(*dh_params[2])
     T4 = dh_transform(*dh_params[3])
     T5 = dh_transform(*dh_params[4])
-    
-    Ttool = create_tool_transform()
+
 
     # 总变换矩阵（基座到末端）
-    T_total = T1 @ T2 @ T3 @ T4 @ T5 @ Ttool
+    T_total = T1 @ T2 @ T3 @ T4 @ T5
 
     # print(T_total)
     # print(T1 @ T2)
@@ -155,7 +161,7 @@ def forward_kinematics(joint_angles: list[float]) -> list[float]:
     rotation_matrix = T_total[:3, :3]
     rot_obj = R.from_matrix(rotation_matrix)
     
-    roll, pitch, yaw = rot_obj.as_euler('xyz', degrees=False)
+    roll, pitch, yaw = rot_obj.as_euler('zyx', degrees=False)
     
     # print("末端位置 (X, Y, Z):", x, y, z)
     # print("末端姿态 (roll, pitch, yaw):", roll, pitch, yaw)
@@ -163,22 +169,56 @@ def forward_kinematics(joint_angles: list[float]) -> list[float]:
     return np.round([x, y, z, roll, pitch, yaw], 10).tolist()
 
 
-def scale_position(end_pose: list[float]) -> list[float]:
+def map_so2crp(end_pose: list[float]) -> list[float]:
     """
-    输入: end_pose - [x, y, z, roll, pitch, yaw] 格式的末端位姿列表
-    输出: [x', y', z', roll, pitch, yaw] - 缩放后的位置和原始姿态
+    输入: so101 - [x, y, z, roll, pitch, yaw]
+    输出: CRPArm - [x, y, z, roll, pitch, yaw]
+    
+    位置映射: 从 SO101 的位置范围映射到 CRPArm 的位置范围
+    姿态转换: SO101 使用弧度，CRPArm 使用角度
     """
     if len(end_pose) != 6:
-        raise ValueError("输入的末端位姿必须包含6个元素")
-    # 分离位置和姿态
-    x, y, z = end_pose[:3]
-    roll, pitch, yaw = end_pose[3:]
-    # 缩放位置
-    x_scaled = x * 3
-    y_scaled = y * 3
-    z_scaled = z * 3
-    # 返回缩放后的位置和原始的姿态
-    return [x_scaled, y_scaled, z_scaled, roll, pitch, yaw]
+        raise ValueError("end_pose 必须包含6个值: [x, y, z, roll, pitch, yaw]")
+    
+    x, y, z, roll, pitch, yaw = end_pose
+    
+    # SO101 位置范围 m
+    so101_x_range = (0.05, 0.25)  # (min, max)
+    so101_y_range = (-0.25, 0.25)  # (min, max)
+    so101_z_range = (-0.10, 0.20)   # (min, max)
+    
+    # CRPArm 位置范围 mm
+    crp_x_range = (270, 760)    # (min, max)
+    crp_y_range = (-150, 400)    # (min, max)
+    crp_z_range = (-315, 270)     # (min, max)
+    
+    # 限制输入值到 SO101 的范围内，确保安全
+    x_clipped = np.clip(x, so101_x_range[0], so101_x_range[1])
+    y_clipped = np.clip(y, so101_y_range[0], so101_y_range[1])
+    z_clipped = np.clip(z, so101_z_range[0], so101_z_range[1])
+
+    # 映射位置: 从 SO101 范围映射到 CRPArm 范围 (使用标准线性映射)
+    def linear_map(value: float, in_min: float, in_max: float, out_min: float, out_max: float) -> float:
+        """标准线性映射"""
+        if in_max == in_min:
+            return out_min
+        return (value - in_min) / (in_max - in_min) * (out_max - out_min) + out_min
+    
+    x_mapped = linear_map(x_clipped, so101_x_range[0], so101_x_range[1], crp_x_range[0], crp_x_range[1])
+    y_mapped = linear_map(y_clipped, so101_y_range[0], so101_y_range[1], crp_y_range[0], crp_y_range[1])
+    z_mapped = linear_map(z_clipped, so101_z_range[0], so101_z_range[1], crp_z_range[0], crp_z_range[1])
+    
+    # 限制输出值到 CRPArm 的范围内，确保安全
+    x_mapped = np.clip(x_mapped, crp_x_range[0], crp_x_range[1])
+    y_mapped = np.clip(y_mapped, crp_y_range[0], crp_y_range[1])
+    z_mapped = np.clip(z_mapped, crp_z_range[0], crp_z_range[1])
+    
+    # 转换姿态: 从弧度转换为角度
+    roll_deg = np.degrees(roll)
+    pitch_deg = np.degrees(pitch)
+    yaw_deg = np.degrees(yaw)
+    
+    return np.round([x_mapped, y_mapped, z_mapped, 179.969, -0.024, -123.208], 10).tolist()
 
 
 def get_so101_endpose(action: dict[str, float]):
@@ -190,7 +230,7 @@ def get_so101_endpose(action: dict[str, float]):
 def get_endpose2Crp(action: dict[str, float]):
     action_copy = copy.deepcopy(action)
     joints_radian = so101_to_radian(action_copy)
-    return scale_position(forward_kinematics(joints_radian[:5]))
+    return map_so2crp(forward_kinematics(joints_radian[:5]))
 
 
 
@@ -203,14 +243,16 @@ if __name__ == "__main__":
 
 
 
-    dict = {'shoulder_pan.pos': -9.344082081348475, 
-            'shoulder_lift.pos': -29.158025715470757, 
-            'elbow_flex.pos': 72.99729972997301, 
-            'wrist_flex.pos': 5.586353944562902, 
-            'wrist_roll.pos': 11.040645719227456, 
-            'gripper.pos': 1.7651573292402147}
+    # dict = {'shoulder_pan.pos': -9.344082081348475, 
+    #         'shoulder_lift.pos': -29.158025715470757, 
+    #         'elbow_flex.pos': 72.99729972997301, 
+    #         'wrist_flex.pos': 5.586353944562902, 
+    #         'wrist_roll.pos': 11.040645719227456, 
+    #         'gripper.pos': 1.7651573292402147}
     
-    # _ = get_so101_endpose(dict)
+    # # _ = get_so101_endpose(dict)
 
-    A = get_endpose2Crp(dict)
-    print(A)
+    # A = get_endpose2Crp(dict)
+    # print(A)
+
+    print(create_tool_transform())

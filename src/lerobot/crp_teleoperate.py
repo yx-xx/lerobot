@@ -58,7 +58,7 @@ from pprint import pformat
 
 import rerun as rr
 
-from .tools import load_CrpRobotPy, get_endpose2Crp, get_so101_endpose
+from .tools import load_CrpRobotPy, get_endpose2Crp, Trajectory_process, get_so101_endpose
 load_CrpRobotPy()
 # from CrpRobotPy import CrpRobotPy, RobotMode
 
@@ -140,6 +140,7 @@ def teleop_loop_crp(
     start = time.perf_counter()
 
     while True:
+        print("in loop")
         loop_start = time.perf_counter()
 
         # Get robot observation
@@ -157,15 +158,25 @@ def teleop_loop_crp(
         # Process action for robot through pipeline
         robot_action_to_send = robot_action_processor((teleop_action, obs))
 
-        ###### 添加获取末端位置代码
-        crp_endpose = get_so101_endpose(robot_action_to_send)
-        print(f"crp_endpose: {crp_endpose}")
+        # ###### 获取末端位置代码
+        # so101_endpose = get_so101_endpose(robot_action_to_send)
+        # print(f"so101_endpose: {so101_endpose}")
+
+        ###### 获取目标末端位置
+        crp_endpose_target = get_endpose2Crp(robot_action_to_send)
+        # print(f"crp_endpose: {crp_endpose_target}")
+
+        ######获取当前末端位置
+        print(f"get_current_endpose: {robot.get_current_endpose()}")
+
 
         # # Send processed action to robot (robot_action_processor.to_output should return dict[str, Any])
         # _ = robot.send_action(robot_action_to_send)
 
-        # ###### 发送末端位置到CRP机械臂
-        # _ = robot.send_endpose(crp_endpose)
+
+        ###### 发送末端位置到CRP机械臂
+        _ = robot.send_endpose(Trajectory_process(robot.get_current_endpose(), crp_endpose_target, step_length=5))
+        # _ = robot.send_endpose(crp_endpose_target)
 
 
         if display_data:
@@ -206,6 +217,10 @@ def teleoperate(cfg: TeleoperateConfig):
 
     teleop.connect()
     robot.connect()
+
+    print("当前速度比：", robot.get_speed_ratio())
+    robot.set_speed_ratio(100)
+    print("当前速度比：", robot.get_speed_ratio())
 
     try:
         teleop_loop_crp(

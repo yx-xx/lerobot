@@ -142,11 +142,9 @@ class CRPArm(Robot):
     #     logger.info(f"{self} disconnected.")
 
 
-
-
     @property
     def is_connected(self) -> bool:
-        return self.crp_arm_robot.is_connected and all(cam.is_connected for cam in self.cameras.values())
+        return self.crp_arm_robot.is_connected() and all(cam.is_connected for cam in self.cameras.values())
 
     def connect(self, calibrate: bool = True) -> None:
         """
@@ -162,7 +160,7 @@ class CRPArm(Robot):
         #     )
         #     self.calibrate()
 
-        self.crp_arm_robot.connect(self.config_class.ip)
+        self.crp_arm_robot.connect(self.config.port)
         self.crp_arm_robot.servo_power_on()
         self.crp_arm_robot.switch_work_mode(RobotMode.Manual)
 
@@ -339,7 +337,24 @@ class CRPArm(Robot):
         if len(endpose) != 6:
             print("crp_arm: [ERROR] endpose必须包含6个值")
             return
+
         try:
-            _ = self.crp_arm_robot.movel_user(endpose,10000)
+            _ = self.crp_arm_robot.movel_user(endpose,100)
         except Exception as e:
             print("crp_arm: [ERROR] movel_user机械臂运动失败", e)
+
+    def set_speed_ratio(self, ratio: int):
+        self.crp_arm_robot.set_speed_ratio(ratio)
+        return
+    
+    def get_speed_ratio(self) -> int:
+        return self.crp_arm_robot.get_speed_ratio()
+    
+    def get_current_endpose(self) -> list[float]:
+        """
+        获取当前末端位置姿态
+        返回: [x, y, z, roll, pitch, yaw]
+        """
+        x, y, z, roll, pitch, yaw = self.crp_arm_robot.read_end_pose_user()
+        return [x, y, z, roll, pitch, yaw]
+    
