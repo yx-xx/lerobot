@@ -13,21 +13,22 @@ def create_so101_dh_params():
     ]
 
 def create_tool_transform():
-    """Ttool"""
+    """so101end_T_crpend"""
     # return np.array([
     #     [1.0, 0.0, 0.0, 0.0],
-    #     [0.0, -1.0, 0.0, 0.0],
-    #     [0.0, 0.0, -1.0, 0.0],
+    #     [0.0, 1.0, 0.0, 0.0],
+    #     [0.0, 0.0, 1.0, 0.0],
     #     [0.0, 0.0, 0.0, 1.0]
     # ])
 
-    return np.array([
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.0],
-        [0.0, 0.0, 0.0, 1.0]
+    return np.array([  
+        [0.9856216,  -0.13022117,  0.10766848,  0.0],
+        [0.16881813,  0.78573135, -0.59508544,  0.0],
+        [-0.00710578, 0.60470545,  0.79641749,  0.0],
+        [0.0,         0.0,         0.0,         1.0],
     ])
 
+ 
 def create_base_transform():
     """so101_DH_to_CRPArm"""
     return np.array([
@@ -153,7 +154,7 @@ def forward_kinematics(joint_angles: list[float]) -> list[float]:
     # 总变换矩阵（基座到末端）
     T_total = Tbase @ T1 @ T2 @ T3 @ T4 @ T5 @ Ttool
 
-    # print(T_total)
+    print("T_total",T_total)
     # print(T1 @ T2)
 
     # 提取位置和姿态
@@ -164,7 +165,7 @@ def forward_kinematics(joint_angles: list[float]) -> list[float]:
     roll, pitch, yaw = rot_obj.as_euler('zyx', degrees=False)
     
     # print("末端位置 (X, Y, Z):", x, y, z)
-    # print("末端姿态 (roll, pitch, yaw):", roll, pitch, yaw)
+    print("末端姿态 (roll, pitch, yaw):", roll, pitch, yaw)
 
     return np.round([x, y, z, roll, pitch, yaw], 10).tolist()
 
@@ -219,6 +220,9 @@ def map_so2crp(end_pose: list[float]) -> list[float]:
     yaw_deg = np.degrees(yaw)
     
     return np.round([x_mapped, y_mapped, z_mapped, 179.969, -0.024, -123.208], 10).tolist()
+    # return np.round([490, 104, 217, roll_deg, pitch_deg, yaw_deg], 10).tolist()
+
+    # return np.round([x_mapped, y_mapped, z_mapped, roll_deg, pitch_deg, yaw_deg], 10).tolist()
 
 
 def get_so101_endpose(action: dict[str, float]):
