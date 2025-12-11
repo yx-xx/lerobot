@@ -140,7 +140,6 @@ def teleop_loop_crp(
     start = time.perf_counter()
 
     while True:
-        print("in loop")
         loop_start = time.perf_counter()
 
         # Get robot observation
@@ -175,8 +174,8 @@ def teleop_loop_crp(
 
 
         ###### 发送末端位置到CRP机械臂
-        _ = robot.send_endpose(Trajectory_process(robot.get_current_endpose(), crp_endpose_target, step_length=20))
-        # _ = robot.send_endpose(crp_endpose_target)
+        # _ = robot.send_endpose(Trajectory_process(robot.get_current_endpose(), crp_endpose_target, step_length=30))
+        _ = robot.send_endpose(crp_endpose_target)
 
 
         if display_data:
@@ -219,7 +218,7 @@ def teleoperate(cfg: TeleoperateConfig):
     robot.connect()
 
     print("当前速度比：", robot.get_speed_ratio())
-    robot.set_speed_ratio(20)
+    robot.set_speed_ratio(100)
     print("当前速度比：", robot.get_speed_ratio())
 
     try:

@@ -471,7 +471,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
 
     ###### 设置速度比
     print("当前速度比：", robot.get_speed_ratio())
-    robot.set_speed_ratio(20)
+    robot.set_speed_ratio(100)
     print("当前速度比：", robot.get_speed_ratio())
 
     with VideoEncodingManager(dataset):

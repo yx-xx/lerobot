@@ -302,7 +302,6 @@ class CRPArm(Robot):
         return obs_dict
 
 
-    # 暂时不用
     def send_action(self, action: dict[str, Any]) -> dict[str, Any]:
         """Command arm to move to a target joint configuration.
 
@@ -321,15 +320,8 @@ class CRPArm(Robot):
 
         goal_pos = {key.removesuffix(".pos"): val for key, val in action.items() if key.endswith(".pos")}
 
-        # # Cap goal position when too far away from present position.
-        # # /!\ Slower fps expected due to reading from the follower.
-        # if self.config.max_relative_target is not None:
-        #     present_pos = self.bus.sync_read("Present_Position")
-        #     goal_present_pos = {key: (g_pos, present_pos[key]) for key, g_pos in goal_pos.items()}
-        #     goal_pos = ensure_safe_goal_position(goal_present_pos, self.config.max_relative_target)
-
-        # # Send goal position to the arm
-        # self.bus.sync_write("Goal_Position", goal_pos)
+        self.crp_arm_robot.movej(goal_pos)
+ 
         return {f"{motor}.pos": val for motor, val in goal_pos.items()}
     
 
@@ -339,7 +331,7 @@ class CRPArm(Robot):
             return
 
         try:
-            _ = self.crp_arm_robot.movel_user(endpose,100)
+            _ = self.crp_arm_robot.movel_user(endpose)
         except Exception as e:
             print("crp_arm: [ERROR] movel_user机械臂运动失败", e)
 
