@@ -305,6 +305,8 @@ def record_loop(
         if policy is not None or dataset is not None:
             observation_frame = build_dataset_frame(dataset.features, obs_processed, prefix="observation")
 
+
+        ############# 策略控制 #############
         # Get action from either policy or teleop
         if policy is not None and preprocessor is not None and postprocessor is not None:
             action_values = predict_action(
@@ -323,12 +325,15 @@ def record_loop(
                 f"{name}": float(action_values[i]) for i, name in enumerate(action_names)
             }
 
+        ############# 单设备遥操作 #############
         elif policy is None and isinstance(teleop, Teleoperator):
             act = teleop.get_action()
 
             # Applies a pipeline to the raw teleop action, default is IdentityProcessor
             act_processed_teleop = teleop_action_processor((act, obs))
 
+
+        ############# 多设备遥操作 #############
         elif policy is None and isinstance(teleop, list):
             arm_action = teleop_arm.get_action()
             arm_action = {f"arm_{k}": v for k, v in arm_action.items()}

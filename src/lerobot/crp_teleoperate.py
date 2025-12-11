@@ -164,7 +164,7 @@ def teleop_loop_crp(
 
         ###### 获取目标末端位置
         crp_endpose_target = get_endpose2Crp(robot_action_to_send)
-        print(f"crp_endpose: {crp_endpose_target}")
+        # print(f"crp_endpose: {crp_endpose_target}")
 
         # ######获取当前末端位置
         # print(f"get_current_endpose: {robot.get_current_endpose()}")

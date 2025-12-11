@@ -100,6 +100,7 @@ from lerobot.robots import (  # noqa: F401
     make_robot_from_config,
     so100_follower,
     so101_follower,
+    crp_arm, #添加CRP_Arm
 )
 from lerobot.teleoperators import (  # noqa: F401
     Teleoperator,
@@ -147,7 +148,7 @@ class DatasetRecordConfig:
     # Encode frames in the dataset into video
     video: bool = True
     # Upload dataset to Hugging Face hub.
-    push_to_hub: bool = True
+    push_to_hub: bool = False
     # Upload on private repository on the Hugging Face hub.
     private: bool = False
     # Add tags to your dataset on the hub.
@@ -308,6 +309,8 @@ def record_loop(
         if policy is not None or dataset is not None:
             observation_frame = build_dataset_frame(dataset.features, obs_processed, prefix="observation")
 
+
+        ############# 策略控制 #############
         # Get action from either policy or teleop
         if policy is not None and preprocessor is not None and postprocessor is not None:
             action_values = predict_action(
@@ -326,12 +329,15 @@ def record_loop(
                 f"{name}": float(action_values[i]) for i, name in enumerate(action_names)
             }
 
+        ############# 单设备遥操作 #############
         elif policy is None and isinstance(teleop, Teleoperator):
             act = teleop.get_action()
 
             # Applies a pipeline to the raw teleop action, default is IdentityProcessor
             act_processed_teleop = teleop_action_processor((act, obs))
 
+
+        ############# 多设备遥操作 #############
         elif policy is None and isinstance(teleop, list):
             arm_action = teleop_arm.get_action()
             arm_action = {f"arm_{k}": v for k, v in arm_action.items()}
@@ -347,23 +353,34 @@ def record_loop(
             )
             continue
 
+
+        ############### 数据处理 ###############
         # Applies a pipeline to the action, default is IdentityProcessor
         if policy is not None and act_processed_policy is not None:
             action_values = act_processed_policy
             robot_action_to_send = robot_action_processor((act_processed_policy, obs))
         else:
+            ############### 遥操作获取末端位姿数据 ###############
             action_values = act_processed_teleop
-            robot_action_to_send = robot_action_processor((act_processed_teleop, obs))
+            robot_action_to_send_tamp = robot_action_processor((act_processed_teleop, obs))
+            robot_action_to_send = get_endpose2Crp(robot_action_to_send_tamp)
+
 
         # Send action to robot
         # Action can eventually be clipped using `max_relative_target`,
         # so action actually sent is saved in the dataset. action = postprocessor.process(action)
         # TODO(steven, pepijn, adil): we should use a pipeline step to clip the action, so the sent action is the action that we input to the robot.
-        _sent_action = robot.send_action(robot_action_to_send)
+        
+        ############### 遥操作发送末端位姿数据 ###############
+        _ = robot.send_endpose(robot_action_to_send)
 
         # Write to dataset
-        if dataset is not None:
-            action_frame = build_dataset_frame(dataset.features, action_values, prefix="action")
+        if dataset is not None:            
+            ###### 调用CrpRobotPy获取关节角度数据 ######
+            crp_arm_joint = robot.crp_arm_robot.read_joints()
+            crp_arm_joint_values = {f"{joint}.pos": val for joint, val in crp_arm_joint.items()}
+
+            action_frame = build_dataset_frame(dataset.features, crp_arm_joint_values, prefix="action")
             frame = {**observation_frame, **action_frame, "task": single_task}
             dataset.add_frame(frame)
 
@@ -451,6 +468,11 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
         teleop.connect()
 
     listener, events = init_keyboard_listener()
+
+    ###### 设置速度比
+    print("当前速度比：", robot.get_speed_ratio())
+    robot.set_speed_ratio(20)
+    print("当前速度比：", robot.get_speed_ratio())
 
     with VideoEncodingManager(dataset):
         recorded_episodes = 0

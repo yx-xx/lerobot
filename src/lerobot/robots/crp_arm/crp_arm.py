@@ -68,12 +68,12 @@ class CRPArm(Robot):
         self.crp_arm_robot = CrpRobotPy()
 
         self.crp_joints = {    
-        "joint_1": float,
-        "joint_2": float, 
-        "joint_3": float,
-        "joint_4": float,
-        "joint_5": float,
-        "joint_6": float,
+        "j1": float,
+        "j2": float, 
+        "j3": float,
+        "j4": float,
+        "j5": float,
+        "j6": float,
         }
 
         self.cameras = make_cameras_from_configs(config.cameras)

@@ -1,5 +1,6 @@
 [console_scripts]
 lerobot-calibrate = lerobot.calibrate:main
+lerobot-crp_record = lerobot.crp_record:main
 lerobot-crp_teleoperate = lerobot.crp_teleoperate:main
 lerobot-eval = lerobot.scripts.eval:main
 lerobot-find-cameras = lerobot.find_cameras:main

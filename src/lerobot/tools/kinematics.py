@@ -154,7 +154,7 @@ def forward_kinematics(joint_angles: list[float]) -> list[float]:
     # 总变换矩阵（基座到末端）
     T_total = Tbase @ T1 @ T2 @ T3 @ T4 @ T5 @ Ttool
 
-    print("T_total",T_total)
+    # print("T_total",T_total)
     # print(T1 @ T2)
 
     # 提取位置和姿态
@@ -165,7 +165,7 @@ def forward_kinematics(joint_angles: list[float]) -> list[float]:
     roll, pitch, yaw = rot_obj.as_euler('zyx', degrees=False)
     
     # print("末端位置 (X, Y, Z):", x, y, z)
-    print("末端姿态 (roll, pitch, yaw):", roll, pitch, yaw)
+    # print("末端姿态 (roll, pitch, yaw):", roll, pitch, yaw)
 
     return np.round([x, y, z, roll, pitch, yaw], 10).tolist()
 

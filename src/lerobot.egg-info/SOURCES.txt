@@ -6,6 +6,7 @@ src/lerobot/__init__.py
 src/lerobot/__version__.py
 src/lerobot/calibrate.py
 src/lerobot/constants.py
+src/lerobot/crp_record.py
 src/lerobot/crp_teleoperate.py
 src/lerobot/errors.py
 src/lerobot/find_cameras.py
@@ -227,7 +228,9 @@ src/lerobot/teleoperators/widowx/__init__.py
 src/lerobot/teleoperators/widowx/config_widowx.py
 src/lerobot/teleoperators/widowx/widowx.py
 src/lerobot/templates/lerobot_modelcard_template.md
+src/lerobot/tools/Traj_processor.py
 src/lerobot/tools/__init__.py
+src/lerobot/tools/get_so101end_T_crpend.py
 src/lerobot/tools/kinematics.py
 src/lerobot/tools/lib_loader.py
 src/lerobot/transport/services_pb2.py
