@@ -34,6 +34,8 @@ lerobot-find-port
 
 
 # 遥控
+conda activate lerobotx
+
 sudo chmod 666 /dev/ttyACM*
     
 lerobot-crp_teleoperate \
@@ -48,6 +50,8 @@ lerobot-crp_teleoperate \
 
 # 摄像头
 lerobot-find-cameras opencv
+ 
+ conda activate lerobotx
    
 sudo chmod 666 /dev/ttyACM* 
 
@@ -64,6 +68,10 @@ lerobot-crp_teleoperate \
 
 
 # 采集
+conda activate lerobotx
+
+sudo chmod 666 /dev/ttyACM* 
+
 lerobot-crp_record \
     --robot.type=crp_arm \
     --robot.port=192.168.0.100 \
@@ -81,6 +89,8 @@ lerobot-crp_record \
 
 
 # 回放
+conda activate lerobotx
+
 lerobot-replay \
     --robot.type=crp_arm \
     --robot.port=192.168.0.100 \
