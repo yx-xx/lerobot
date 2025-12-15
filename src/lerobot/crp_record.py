@@ -372,7 +372,8 @@ def record_loop(
         # TODO(steven, pepijn, adil): we should use a pipeline step to clip the action, so the sent action is the action that we input to the robot.
         
         ############### 遥操作发送末端位姿数据 ###############
-        _ = robot.send_endpose(robot_action_to_send)
+        # _ = robot.send_endpose(robot_action_to_send)
+        _ = robot.send_endpose(Trajectory_process(robot.get_current_endpose(), robot_action_to_send, step_length=20))
 
         # Write to dataset
         if dataset is not None:            
@@ -471,7 +472,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
 
     ###### 设置速度比
     print("当前速度比：", robot.get_speed_ratio())
-    robot.set_speed_ratio(100)
+    robot.set_speed_ratio(20)
     print("当前速度比：", robot.get_speed_ratio())
 
     with VideoEncodingManager(dataset):
