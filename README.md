@@ -2,6 +2,8 @@
 
 这是一个使用LeRobot框架的机器人开发项目
 
+
+```
 ├── benchmarks
 │   └── video
 ├── CODE_OF_CONDUCT.md
@@ -71,4 +73,5 @@
 │   └── utils.py
 └── third_party
     └── CrpRobotPy
+```
 
