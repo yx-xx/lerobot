@@ -189,8 +189,8 @@ def map_so2crp(end_pose: list[float]) -> list[float]:
     so101_z_range = (-0.10, 0.20)   # (min, max)
     
     # CRPArm 位置范围 mm
-    crp_x_range = (270, 760)    # (min, max)
-    crp_y_range = (-150, 400)    # (min, max)
+    crp_x_range = (320, 760)    # (min, max)
+    crp_y_range = (-190, 400)    # (min, max)
     crp_z_range = (-315, 270)     # (min, max)
     
     # 限制输入值到 SO101 的范围内，确保安全
