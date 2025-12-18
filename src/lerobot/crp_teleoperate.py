@@ -174,8 +174,8 @@ def teleop_loop_crp(
 
 
         ###### 发送末端位置到CRP机械臂
-        # _ = robot.send_endpose(Trajectory_process(robot.get_current_endpose(), crp_endpose_target, step_length=20))
-        _ = robot.send_endpose(crp_endpose_target)
+        _ = robot.send_endpose(Trajectory_process(robot.get_current_endpose(), crp_endpose_target, step_length=20))
+        # _ = robot.send_endpose(crp_endpose_target)
 
 
         if display_data:
