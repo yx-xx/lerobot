@@ -77,16 +77,17 @@ lerobot-crp_record \
     --robot.type=crp_arm \
     --robot.port=192.168.0.100 \
     --robot.id=crobotp \
-    --robot.cameras="{ right: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}, left: {type: opencv, index_or_path: 2, width: 640, height: 480, fps: 30}}" \
+    --robot.cameras="{ right: {type: opencv, index_or_path: 2, width: 640, height: 480, fps: 30}, left: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}}" \
     --teleop.type=so101_leader \
     --teleop.port=/dev/ttyACM0 \
     --teleop.id=mycong\
     --display_data=true\
-    --dataset.repo_id=so101CrpData/2 \
-    --dataset.num_episodes=30 \
+    --dataset.repo_id=so101CrpData/3 \
+    --dataset.num_episodes=15 \
     --dataset.single_task="Push the red block into the black square on the table" \
     --dataset.episode_time_s=150 \
-    --dataset.reset_time_s=20 
+    --dataset.reset_time_s=20 \
+    --resume=true
 
 
 ## 推红色方块和蓝色方块
@@ -104,7 +105,7 @@ lerobot-crp_record \
     --dataset.single_task="Push the red square on the table to the black box on the left and the blue square to the black box on the right" \
     --dataset.episode_time_s=250 \
     --dataset.reset_time_s=20 \
-    --resume=true
+
 
 
 
@@ -160,11 +161,11 @@ lerobot-record \
   --robot.type=crp_arm \
   --robot.port=192.168.0.100 \
   --robot.id=crobotp \
-  --robot.cameras="{ right: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}, left: {type: opencv, index_or_path: 2, width: 640, height: 480, fps: 30}}" \
+  --robot.cameras="{ right: {type: opencv, index_or_path: 2, width: 640, height: 480, fps: 30}, left: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}}" \
   --display_data=true\
   --dataset.repo_id=so101CrpData/eval_2 \
   --dataset.single_task="Push the red block into the black square on the table" \
-  --policy.path=outputs/train/act_crp/checkpoints/last/pretrained_model
+  --policy.path=outputs/45/pretrained_model
 
 
 
@@ -172,7 +173,7 @@ lerobot-record \
   --robot.type=crp_arm \
   --robot.port=192.168.0.100 \
   --robot.id=crobotp \
-  --robot.cameras="{ right: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}, left: {type: opencv, index_or_path: 2, width: 640, height: 480, fps: 30}}" \
+  --robot.cameras="{ right: {type: opencv, index_or_path: 2, width: 640, height: 480, fps: 30}, left: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}}" \
   --display_data=true\
   --dataset.repo_id=so101CrpData/eval_3 \
   --dataset.single_task="Push the red block into the black square on the table" \

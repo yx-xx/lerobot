@@ -2,6 +2,20 @@
 
 这是一个使用LeRobot框架的机器人开发项目
 
+## 构建说明
+
+```bash
+conda create -y -n lerobotx python=3.10 && conda activate lerobotx
+
+conda install ffmpeg -c conda-forge
+
+cd ~/lerobot
+pip install -e ".[feetech]"
+
+pip install scipy==1.15.3
+```
+
+## 项目结构
 
 ```
 ├── benchmarks
