@@ -1,9 +1,45 @@
 import math
-from typing import List
+from typing import List, Optional
 
 
-def Trajectory_process(current_pose: List[float], target_pose: List[float], step_length: float = 0.1) -> List[float]:
+class TrajectoryProcessor:
+    """Trajectory processor that computes an incremental step from current to target
+    pose and stores a small history of 6-element points.
 
+    Attributes:
+            points (list[list[float]]): stored points, each is a 6-float list [x,y,z,roll,pitch,yaw].
+            max_points (int): how many recent points to keep when writing single vectors.
+    """
+
+    def __init__(self, points: Optional[List[List[float]]] = None, max_points: int = 5):
+        if max_points < 1:
+                raise ValueError("max_points must be >= 1")
+        self.max_points = int(max_points)
+
+        self._written_once = False
+
+        if points is None:
+                # initialize with zeros
+                self.points: List[List[float]] = [[0.0] * 6 for _ in range(self.max_points)]
+        else:
+                # validate and store only up to max_points (keep last ones)
+                validated: List[List[float]] = []
+                for p in points:
+                        if not (isinstance(p, (list, tuple)) and len(p) == 6):
+                                raise ValueError("each point must be a list/tuple of length 6")
+                        validated.append([float(x) for x in p])
+                # keep the most recent points (end of list)
+                self.points = validated[-self.max_points :]
+                # consider provided points as real data
+                if len(self.points) > 0 and any(any(v != 0.0 for v in p) for p in self.points):
+                        self._written_once = True
+
+    def trajectory_differential(self, current_pose: List[float], target_pose: List[float], step_length: float = 0.1) -> List[float]:
+        """Compute one incremental pose step from current_pose towards target_pose.
+
+        The translation (x,y,z) moves by at most step_length along the straight line.
+        Orientation (roll,pitch,yaw) is taken from the target_pose.
+        """
         # 输入校验
         if not (isinstance(current_pose, (list, tuple)) and isinstance(target_pose, (list, tuple))):
                 raise ValueError("current_pose and target_pose must be list or tuple of length 6")
@@ -41,9 +77,43 @@ def Trajectory_process(current_pose: List[float], target_pose: List[float], step
 
         return [round(new_x, 10), round(new_y, 10), round(new_z, 10), new_roll, new_pitch, new_yaw]
 
+    def write_point(self, vec: List[float]) -> None:
+        """Write a single 6-element vector into the points history.
+
+        Keeps at most `max_points` latest entries.
+        """
+        if not (isinstance(vec, (list, tuple)) and len(vec) == 6):
+                raise ValueError("vec must be a list/tuple of length 6")
+        point = [float(x) for x in vec]
+
+        if not self._written_once:
+                # First real write: fill all slots with this point
+                self.points = [point[:] for _ in range(self.max_points)]
+                self._written_once = True
+                return
+
+        # Subsequent writes: append and keep only last max_points (FIFO-like)
+        self.points.append(point)
+        if len(self.points) > self.max_points:
+                self.points = self.points[-self.max_points :]
+
+    def read_points(self) -> List[List[float]]:
+        """Return a shallow copy of the stored points list."""
+        return [p[:] for p in self.points]
+
+
 
 if __name__ == "__main__":
-       
-        cur = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        tgt = [0.2, 0.0, 0.0, 0.0, 0.0, 0.0]
-        print(Trajectory_process(cur, tgt, step_length=0.01))
+    # quick demonstration
+    cur = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    tgt = [0.2, 0.0, 0.0, 0.0, 0.0, 0.0]
+    tp = TrajectoryProcessor(points=[
+            [494, 104, 217, 179, 0, -123],
+            [525, 104, 265, 179, 0, -123],
+            [552, 104, 318, 179, 0, -123],
+            [600, 104, 230, 179, 0, -123],
+            [643, 104, 184, 179, 0, -123],
+    ], max_points=5)
+    print(tp.trajectory_differential(cur, tgt, step_length=0.01))
+    tp.write_point([1,2,3,4,5,6])
+    print(tp.read_points())

@@ -47,24 +47,7 @@ class CRPArm(Robot):
     def __init__(self, config: CRPArmConfig):
         super().__init__(config)
         self.config = config
-        # norm_mode_body = MotorNormMode.DEGREES if config.use_degrees else MotorNormMode.RANGE_M100_100
-
-        # # 设置电机
-        # self.bus = FeetechMotorsBus(
-        #     port=self.config.port,
-        #     motors={
-        #         "joint_1": Motor(1, "sts3215", norm_mode_body),
-        #         "joint_2": Motor(2, "sts3215", norm_mode_body),
-        #         "joint_3": Motor(3, "sts3215", norm_mode_body),
-        #         "joint_4": Motor(4, "sts3215", norm_mode_body),
-        #         "joint_5": Motor(5, "sts3215", norm_mode_body),
-        #         "joint_6": Motor(6, "sts3215", norm_mode_body),
-        #         "grasper": Motor(7, "sts3215", MotorNormMode.RANGE_0_100),
-        #     },
-        #     calibration=self.calibration,
-        # )
-
-        # self.robot = CrpRobotPy.CrpRobotPy()
+        
         self.crp_arm_robot = CrpRobotPy()
 
         self.crp_joints = {    
@@ -323,7 +306,7 @@ class CRPArm(Robot):
         self.crp_arm_robot.movej(goal_pos)
  
         return {f"{motor}.pos": val for motor, val in goal_pos.items()}
-    
+
 
     def send_endpose(self, endpose: list[float]):
         if len(endpose) != 6:
@@ -334,6 +317,9 @@ class CRPArm(Robot):
             _ = self.crp_arm_robot.movel_user(endpose)
         except Exception as e:
             print("crp_arm: [ERROR] movel_user机械臂运动失败", e)
+
+    # def send_GPs(self, GPs: list[float]):
+    
 
     def set_speed_ratio(self, ratio: int):
         self.crp_arm_robot.set_speed_ratio(ratio)
