@@ -1,38 +1,16 @@
 import math
 from typing import List, Optional
 
-
 class TrajectoryProcessor:
-    """Trajectory processor that computes an incremental step from current to target
-    pose and stores a small history of 6-element points.
 
-    Attributes:
-            points (list[list[float]]): stored points, each is a 6-float list [x,y,z,roll,pitch,yaw].
-            max_points (int): how many recent points to keep when writing single vectors.
-    """
-
-    def __init__(self, points: Optional[List[List[float]]] = None, max_points: int = 5):
+    def __init__(self, max_points: int = 5):
         if max_points < 1:
-                raise ValueError("max_points must be >= 1")
+            raise ValueError("max_points must be >= 1")
         self.max_points = int(max_points)
 
         self._written_once = False
 
-        if points is None:
-                # initialize with zeros
-                self.points: List[List[float]] = [[0.0] * 6 for _ in range(self.max_points)]
-        else:
-                # validate and store only up to max_points (keep last ones)
-                validated: List[List[float]] = []
-                for p in points:
-                        if not (isinstance(p, (list, tuple)) and len(p) == 6):
-                                raise ValueError("each point must be a list/tuple of length 6")
-                        validated.append([float(x) for x in p])
-                # keep the most recent points (end of list)
-                self.points = validated[-self.max_points :]
-                # consider provided points as real data
-                if len(self.points) > 0 and any(any(v != 0.0 for v in p) for p in self.points):
-                        self._written_once = True
+        self.points: List[List[float]] = [[0.0] * 6 for _ in range(self.max_points)]
 
     def trajectory_differential(self, current_pose: List[float], target_pose: List[float], step_length: float = 0.1) -> List[float]:
         """Compute one incremental pose step from current_pose towards target_pose.
@@ -40,7 +18,7 @@ class TrajectoryProcessor:
         The translation (x,y,z) moves by at most step_length along the straight line.
         Orientation (roll,pitch,yaw) is taken from the target_pose.
         """
-        # 输入校验
+        # Input validation
         if not (isinstance(current_pose, (list, tuple)) and isinstance(target_pose, (list, tuple))):
                 raise ValueError("current_pose and target_pose must be list or tuple of length 6")
         if len(current_pose) != 6 or len(target_pose) != 6:
@@ -57,11 +35,11 @@ class TrajectoryProcessor:
 
         dist = math.sqrt(dx * dx + dy * dy + dz * dz)
 
-        # 如果已经到达或距离小于步长，则返回目标位姿
+        # If already at or within step_length, return the target pose
         if dist <= step_length or dist == 0.0:
                 return [float(x) for x in target_pose]
 
-        # 计算单位向量并移动 step_length
+        # Move along the unit vector by step_length
         ux = dx / dist
         uy = dy / dist
         uz = dz / dist
@@ -70,17 +48,17 @@ class TrajectoryProcessor:
         new_y = cy + uy * step_length
         new_z = cz + uz * step_length
 
-        # 采用目标姿态
+        # Use target orientation
         new_roll = float(target_pose[3])
         new_pitch = float(target_pose[4])
         new_yaw = float(target_pose[5])
 
         return [round(new_x, 10), round(new_y, 10), round(new_z, 10), new_roll, new_pitch, new_yaw]
-
+    
     def write_point(self, vec: List[float]) -> None:
         """Write a single 6-element vector into the points history.
 
-        Keeps at most `max_points` latest entries.
+        Keeps at most `max_points` latest entries. The buffer order is oldest->newest.
         """
         if not (isinstance(vec, (list, tuple)) and len(vec) == 6):
                 raise ValueError("vec must be a list/tuple of length 6")
@@ -95,25 +73,11 @@ class TrajectoryProcessor:
         # Subsequent writes: append and keep only last max_points (FIFO-like)
         self.points.append(point)
         if len(self.points) > self.max_points:
-                self.points = self.points[-self.max_points :]
+                self.points = self.points[-self.max_points:]
 
     def read_points(self) -> List[List[float]]:
         """Return a shallow copy of the stored points list."""
         return [p[:] for p in self.points]
-
-
-
+    
 if __name__ == "__main__":
-    # quick demonstration
-    cur = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    tgt = [0.2, 0.0, 0.0, 0.0, 0.0, 0.0]
-    tp = TrajectoryProcessor(points=[
-            [494, 104, 217, 179, 0, -123],
-            [525, 104, 265, 179, 0, -123],
-            [552, 104, 318, 179, 0, -123],
-            [600, 104, 230, 179, 0, -123],
-            [643, 104, 184, 179, 0, -123],
-    ], max_points=5)
-    print(tp.trajectory_differential(cur, tgt, step_length=0.01))
-    tp.write_point([1,2,3,4,5,6])
-    print(tp.read_points())
+        tp = TrajectoryProcessor()
