@@ -2,18 +2,6 @@ watch -n 1 nvidia-smi
 
 conda env export --no-builds > environment.yml
 
-##################### 安装 #########################
-conda create -y -n lerobotx python=3.10 && conda activate lerobotx
-
-conda install ffmpeg -c conda-forge
-
-cd ~/lerobot
-pip install -e ".[feetech]"
-
-pip install scipy==1.15.3
-##################### 安装 #########################
-
-
 
 #pocket 3
 --robot.cameras="{ front: {type: opencv, index_or_path: 0, width: 1280, height: 720, fps: 30}}" \

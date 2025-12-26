@@ -58,7 +58,7 @@ lerobot-record \
 ```
 """
 
-from .tools import load_CrpRobotPy, get_endpose2Crp, Trajectory_process
+from .tools import load_CrpRobotPy, get_endpose2Crp, trajectory_differential
 load_CrpRobotPy()
 
 import logging
@@ -373,7 +373,7 @@ def record_loop(
         
         ############### 遥操作发送末端位姿数据 ###############
         # _ = robot.send_endpose(robot_action_to_send)
-        _ = robot.send_endpose(Trajectory_process(robot.get_current_endpose(), robot_action_to_send, step_length=20))
+        _ = robot.send_endpose(trajectory_differential(robot.get_current_endpose(), robot_action_to_send, step_length=20))
 
         # Write to dataset
         if dataset is not None:            

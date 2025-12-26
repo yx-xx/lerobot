@@ -5,7 +5,9 @@
 ## 构建说明
 
 ```bash
-conda create -y -n lerobotx python=3.10 && conda activate lerobotx
+conda create -y -n lerobotx python=3.10
+
+conda activate lerobotx
 
 conda install ffmpeg -c conda-forge
 

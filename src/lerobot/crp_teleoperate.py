@@ -58,7 +58,7 @@ from pprint import pformat
 
 import rerun as rr
 
-from .tools import load_CrpRobotPy, get_endpose2Crp, Trajectory_process, get_so101_endpose
+from .tools import load_CrpRobotPy, get_endpose2Crp, trajectory_differential, get_so101_endpose
 load_CrpRobotPy()
 # from CrpRobotPy import CrpRobotPy, RobotMode
 
@@ -174,7 +174,7 @@ def teleop_loop_crp(
 
 
         ###### 发送末端位置到CRP机械臂
-        _ = robot.send_endpose(Trajectory_process(robot.get_current_endpose(), crp_endpose_target, step_length=20))
+        _ = robot.send_endpose(trajectory_differential(robot.get_current_endpose(), crp_endpose_target, step_length=20))
         # _ = robot.send_endpose(crp_endpose_target)
 
 
