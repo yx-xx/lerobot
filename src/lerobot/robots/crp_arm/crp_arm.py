@@ -33,7 +33,7 @@ from .config_crp_arm import CRPArmConfig
 
 
 # import the CrpRobotPy
-from CrpRobotPy import CrpRobotPy, RobotMode, CoordinateSystem
+from CrpRobotPy import CrpRobotPy, RobotMode
 
 
 logger = logging.getLogger(__name__)
@@ -83,46 +83,6 @@ class CRPArm(Robot):
     @cached_property
     def action_features(self) -> dict[str, type]:
         return self._motors_ft
-
-
-
-
-
-
-    # @property
-    # def is_connected(self) -> bool:
-    #     return self.bus.is_connected and all(cam.is_connected for cam in self.cameras.values())
-
-    # def connect(self, calibrate: bool = True) -> None:
-    #     """
-    #     We assume that at connection time, arm is in a rest position,
-    #     and torque can be safely disabled to run calibration.
-    #     """
-    #     if self.is_connected:
-    #         raise DeviceAlreadyConnectedError(f"{self} already connected")
-
-    #     self.bus.connect() #连接电机
-    #     if not self.is_calibrated and calibrate:
-    #         logger.info(
-    #             "Mismatch between calibration values in the motor and the calibration file or no calibration file found"
-    #         )
-    #         self.calibrate()
-
-    #     for cam in self.cameras.values():
-    #         cam.connect()
-
-    #     self.configure()
-    #     logger.info(f"{self} connected.")
-
-    # def disconnect(self):
-    #     if not self.is_connected:
-    #         raise DeviceNotConnectedError(f"{self} is not connected.")
-
-    #     self.bus.disconnect(self.config.disable_torque_on_disconnect)  #断连电机
-    #     for cam in self.cameras.values():
-    #         cam.disconnect()
-
-    #     logger.info(f"{self} disconnected.")
 
 
     @property
@@ -179,83 +139,9 @@ class CRPArm(Robot):
 
 
 
-
-
     def configure(self) -> None:
-        # with self.bus.torque_disabled():
-        #     self.bus.configure_motors()
-        #     for motor in self.bus.motors:
-        #         self.bus.write("Operating_Mode", motor, OperatingMode.POSITION.value)
-        #         # Set P_Coefficient to lower value to avoid shakiness (Default is 32)
-        #         self.bus.write("P_Coefficient", motor, 16)
-        #         # Set I_Coefficient and D_Coefficient to default value 0 and 32
-        #         self.bus.write("I_Coefficient", motor, 0)
-        #         self.bus.write("D_Coefficient", motor, 32)
-
-        #         if motor == "gripper":
-        #             self.bus.write(
-        #                 "Max_Torque_Limit", motor, 500
-        #             )  # 50% of the max torque limit to avoid burnout
-        #             self.bus.write("Protection_Current", motor, 250)  # 50% of max current to avoid burnout
-        #             self.bus.write("Overload_Torque", motor, 25)  # 25% torque when overloaded
         pass
 
-
-    # def setup_motors(self) -> None:
-    #     for motor in reversed(self.bus.motors):
-    #         input(f"Connect the controller board to the '{motor}' motor only and press enter.")
-    #         self.bus.setup_motor(motor)
-    #         print(f"'{motor}' motor id set to {self.bus.motors[motor].id}")
-
-    # def get_observation(self) -> dict[str, Any]:
-    #     if not self.is_connected:
-    #         raise DeviceNotConnectedError(f"{self} is not connected.")
-
-    #     # Read arm position
-    #     start = time.perf_counter()
-    #     obs_dict = self.bus.sync_read("Present_Position")
-    #     obs_dict = {f"{motor}.pos": val for motor, val in obs_dict.items()}
-    #     dt_ms = (time.perf_counter() - start) * 1e3
-    #     logger.debug(f"{self} read state: {dt_ms:.1f}ms")
-
-    #     # Capture images from cameras
-    #     for cam_key, cam in self.cameras.items():
-    #         start = time.perf_counter()
-    #         obs_dict[cam_key] = cam.async_read()
-    #         dt_ms = (time.perf_counter() - start) * 1e3
-    #         logger.debug(f"{self} read {cam_key}: {dt_ms:.1f}ms")
-
-    #     return obs_dict
-
-
-    # def send_action(self, action: dict[str, Any]) -> dict[str, Any]:
-    #     """Command arm to move to a target joint configuration.
-
-    #     The relative action magnitude may be clipped depending on the configuration parameter
-    #     `max_relative_target`. In this case, the action sent differs from original action.
-    #     Thus, this function always returns the action actually sent.
-
-    #     Raises:
-    #         RobotDeviceNotConnectedError: if robot is not connected.
-
-    #     Returns:
-    #         the action sent to the motors, potentially clipped.
-    #     """
-    #     if not self.is_connected:
-    #         raise DeviceNotConnectedError(f"{self} is not connected.")
-
-    #     goal_pos = {key.removesuffix(".pos"): val for key, val in action.items() if key.endswith(".pos")}
-
-    #     # Cap goal position when too far away from present position.
-    #     # /!\ Slower fps expected due to reading from the follower.
-    #     if self.config.max_relative_target is not None:
-    #         present_pos = self.bus.sync_read("Present_Position")
-    #         goal_present_pos = {key: (g_pos, present_pos[key]) for key, g_pos in goal_pos.items()}
-    #         goal_pos = ensure_safe_goal_position(goal_present_pos, self.config.max_relative_target)
-
-    #     # Send goal position to the arm
-    #     self.bus.sync_write("Goal_Position", goal_pos)
-    #     return {f"{motor}.pos": val for motor, val in goal_pos.items()}
 
 
     def get_observation(self) -> dict[str, Any]:
@@ -318,8 +204,22 @@ class CRPArm(Robot):
         except Exception as e:
             print("crp_arm: [ERROR] movel_user机械臂运动失败", e)
 
-    # def send_GPs(self, GPs: list[float]):
-    
+
+
+
+    def send_GPs(self, start_index: int, GPs: list[float]):
+        self.crp_arm_robot.set_GPs(start_index, GPs)
+        return
+
+    def set_GI(self, index: int, value: int) -> bool:
+        self.crp_arm_robot.set_GI(index, value)
+        return
+
+    def get_GI(self, index: int) -> int:
+        return self.crp_arm_robot.get_GI(index)
+
+
+
 
     def set_speed_ratio(self, ratio: int):
         self.crp_arm_robot.set_speed_ratio(ratio)

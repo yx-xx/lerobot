@@ -58,7 +58,7 @@ from pprint import pformat
 
 import rerun as rr
 
-from .tools import load_CrpRobotPy, get_endpose2Crp, trajectory_differential, get_so101_endpose
+from .tools import load_CrpRobotPy, get_endpose2Crp, TrajectoryProcessor, get_so101_endpose
 load_CrpRobotPy()
 # from CrpRobotPy import CrpRobotPy, RobotMode
 
@@ -119,6 +119,7 @@ def teleop_loop_crp(
     robot_observation_processor: RobotProcessorPipeline[RobotObservation, RobotObservation],
     display_data: bool = False,
     duration: float | None = None,
+    trajectory_processor: TrajectoryProcessor = None,
 ):
     """
     This function continuously reads actions from a teleoperation device, processes them through optional
@@ -168,14 +169,21 @@ def teleop_loop_crp(
         # ######获取当前末端位置
         # print(f"get_current_endpose: {robot.get_current_endpose()}")
 
-
         # # Send processed action to robot (robot_action_processor.to_output should return dict[str, Any])
         # _ = robot.send_action(robot_action_to_send)
 
-
         ###### 发送末端位置到CRP机械臂
-        _ = robot.send_endpose(trajectory_differential(robot.get_current_endpose(), crp_endpose_target, step_length=20))
+        # _ = robot.send_endpose(trajectory_processor.trajectory_differential(robot.get_current_endpose(), crp_endpose_target, step_length=20))
         # _ = robot.send_endpose(crp_endpose_target)
+
+
+        ######## GP点发送逻辑
+        trajectory_processor.write_point(trajectory_processor.trajectory_differential(robot.get_current_endpose(), crp_endpose_target, step_length=10))
+        if not abs(robot.get_GI(0)-1) < 1e-6:
+            robot.set_GI(0, 1)
+            robot.set_GI(1, 0)
+        if abs(robot.get_GI(1)) < 1e-6:
+            robot.send_GPs(trajectory_processor.read_points())
 
 
         if display_data:
@@ -221,6 +229,8 @@ def teleoperate(cfg: TeleoperateConfig):
     robot.set_speed_ratio(100)
     print("当前速度比：", robot.get_speed_ratio())
 
+    trajectory_processor = TrajectoryProcessor()
+
     try:
         teleop_loop_crp(
             teleop=teleop,
@@ -231,6 +241,7 @@ def teleoperate(cfg: TeleoperateConfig):
             teleop_action_processor=teleop_action_processor,
             robot_action_processor=robot_action_processor,
             robot_observation_processor=robot_observation_processor,
+            trajectory_processor=trajectory_processor,
         )
     except KeyboardInterrupt:
         pass

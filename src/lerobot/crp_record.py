@@ -58,7 +58,7 @@ lerobot-record \
 ```
 """
 
-from .tools import load_CrpRobotPy, get_endpose2Crp, trajectory_differential
+from .tools import load_CrpRobotPy, get_endpose2Crp, TrajectoryProcessor
 load_CrpRobotPy()
 
 import logging
@@ -257,6 +257,7 @@ def record_loop(
     control_time_s: int | None = None,
     single_task: str | None = None,
     display_data: bool = False,
+    trajectory_processor: TrajectoryProcessor = None,
 ):
     if dataset is not None and dataset.fps != fps:
         raise ValueError(f"The dataset fps should be equal to requested fps ({dataset.fps} != {fps}).")
@@ -373,7 +374,7 @@ def record_loop(
         
         ############### 遥操作发送末端位姿数据 ###############
         # _ = robot.send_endpose(robot_action_to_send)
-        _ = robot.send_endpose(trajectory_differential(robot.get_current_endpose(), robot_action_to_send, step_length=20))
+        _ = robot.send_endpose(trajectory_processor.trajectory_differential(robot.get_current_endpose(), robot_action_to_send, step_length=20))
 
         # Write to dataset
         if dataset is not None:            
@@ -475,6 +476,9 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
     robot.set_speed_ratio(20)
     print("当前速度比：", robot.get_speed_ratio())
 
+    trajectory_processor = TrajectoryProcessor()
+
+
     with VideoEncodingManager(dataset):
         recorded_episodes = 0
         while recorded_episodes < cfg.dataset.num_episodes and not events["stop_recording"]:
@@ -494,6 +498,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                 control_time_s=cfg.dataset.episode_time_s,
                 single_task=cfg.dataset.single_task,
                 display_data=cfg.display_data,
+                trajectory_processor=trajectory_processor,
             )
 
             # Execute a few seconds without recording to give time to manually reset the environment
