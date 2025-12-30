@@ -211,6 +211,10 @@ class CRPArm(Robot):
         self.crp_arm_robot.set_GPs(start_index, GPs)
         return
 
+    def send_GJs(self, start_index: int, GJs: list[float]):
+        self.crp_arm_robot.set_GJs(start_index, GJs)
+        return
+
     def set_GI(self, index: int, value: int) -> bool:
         self.crp_arm_robot.set_GI(index, value)
         return
