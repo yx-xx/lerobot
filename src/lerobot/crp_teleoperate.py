@@ -183,7 +183,7 @@ def teleop_loop_crp(
             robot.set_GI(0, 1)
             robot.set_GI(1, 0)
         if abs(robot.get_GI(1)) < 1e-6:
-            robot.send_GPs(trajectory_processor.read_points())
+            robot.send_GPs(10, trajectory_processor.read_points())
 
 
         if display_data:
