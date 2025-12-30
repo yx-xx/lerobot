@@ -3,14 +3,17 @@ from typing import List
 
 class TrajectoryProcessor:
 
-    def __init__(self, max_points: int = 5):
+    def __init__(self, max_points: int = 5, max_joints: int = 5):
         if max_points < 1:
             raise ValueError("max_points must be >= 1")
         self.max_points = int(max_points)
+        self.max_joints = int(max_joints)
 
-        self._written_once = False
-
+        self._written_once_point = False
+        self._written_once_joint = False
+        
         self.points: List[List[float]] = [[0.0] * 6 for _ in range(self.max_points)]
+        self.joints: List[List[float]] = [[0.0] * 6 for _ in range(self.max_joints)]
 
     def trajectory_differential(self, current_pose: List[float], target_pose: List[float], step_length: float = 0.1) -> List[float]:
         """Compute one incremental pose step from current_pose towards target_pose.
@@ -55,6 +58,8 @@ class TrajectoryProcessor:
 
         return [round(new_x, 10), round(new_y, 10), round(new_z, 10), new_roll, new_pitch, new_yaw]
     
+
+    
     def write_point(self, vec: List[float]) -> None:
         """Write a single 6-element vector into the points history.
 
@@ -64,10 +69,10 @@ class TrajectoryProcessor:
             raise ValueError("vec must be a list/tuple of length 6")
         point = [float(x) for x in vec]
 
-        if not self._written_once:
+        if not self._written_once_point:
             # First real write: fill all slots with this point
             self.points = [point[:] for _ in range(self.max_points)]
-            self._written_once = True
+            self._written_once_point = True
             return
 
         # Subsequent writes: append and keep only last max_points
@@ -79,6 +84,33 @@ class TrajectoryProcessor:
         """Return a shallow copy of the stored points list."""
         return [p[:] for p in self.points]
     
+
+
+    def write_joint(self, vec: List[float]) -> None:
+        """Write a single 6-element vector into the joints history.
+
+        Keeps at most `max_joints` latest entries. The buffer order is oldest->newest.
+        """
+        if not (isinstance(vec, (list, tuple)) and len(vec) == 6):
+            raise ValueError("vec must be a list/tuple of length 6")
+        joint = [float(x) for x in vec]
+
+        if not self._written_once_joint:
+            # First real write: fill all slots with this joint
+            self.joints = [joint[:] for _ in range(self.max_joints)]
+            self._written_once_joint = True
+            return
+
+        # Subsequent writes: append and keep only last max_joints
+        self.joints.append(joint)
+        if len(self.joints) > self.max_joints:
+            self.joints = self.joints[-self.max_joints:]
+
+    def read_joints(self) -> List[List[float]]:
+        """Return a shallow copy of the stored joints list."""
+        return [j[:] for j in self.joints]
+
+
 if __name__ == "__main__":
     
     # 1. 初始化测试
