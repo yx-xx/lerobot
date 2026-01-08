@@ -178,13 +178,15 @@ def teleop_loop_crp(
 
 
         ######## GP点发送逻辑
-        trajectory_processor.write_point(trajectory_processor.trajectory_differential(robot.get_current_endpose(), crp_endpose_target, step_length=10))
-        if not abs(robot.get_GI(0)-1) < 1e-6:
-            robot.set_GI(0, 1)
-            robot.set_GI(1, 0)
-        if abs(robot.get_GI(1)) < 1e-6:
+        trajectory_processor.write_point(trajectory_processor.trajectory_differential(robot.get_current_endpose(), crp_endpose_target, step_length=100))
+        # if not abs(robot.get_GI(0)-1) < 1e-3:
+        #     print("in GI 1111111111111111111111111111111111111111111111")
+        #     robot.set_GI(0, 1)
+        #     robot.set_GI(1, 0)
+        if abs(robot.get_GI(1)) < 1e-3:
+            print("in GI", robot.get_GI(1))
             robot.send_GPs(10, trajectory_processor.read_points())
-
+            robot.set_GI(1, 1)
 
         if display_data:
             # Process robot observation through pipeline

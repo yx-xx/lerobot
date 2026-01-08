@@ -105,13 +105,15 @@ class CRPArm(Robot):
 
         self.crp_arm_robot.connect(self.config.port)
         self.crp_arm_robot.servo_power_on()
-        self.crp_arm_robot.switch_work_mode(RobotMode.Manual)
+        # self.crp_arm_robot.switch_work_mode(RobotMode.Manual)
+        self.crp_arm_robot.switch_work_mode(RobotMode.Auto)
 
         for cam in self.cameras.values():
             cam.connect()
 
         self.configure()
         logger.info(f"{self} connected.")
+
 
     def disconnect(self):
         if not self.is_connected:
@@ -136,7 +138,6 @@ class CRPArm(Robot):
 
     def calibrate(self) -> None:
         pass
-
 
 
     def configure(self) -> None:
