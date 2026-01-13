@@ -3,7 +3,7 @@ from typing import List
 
 class TrajectoryProcessor:
 
-    def __init__(self, max_points: int = 3, max_joints: int = 5):
+    def __init__(self, max_points: int = 1, max_joints: int = 5):
         if max_points < 1:
             raise ValueError("max_points must be >= 1")
         self.max_points = int(max_points)

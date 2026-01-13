@@ -142,8 +142,10 @@ def teleop_loop_crp(
     
 
     # 初始化GP点寄存器
-    robot.send_GPs(10, trajectory_processor.init_matrix(robot.get_current_endpose(), group_size=6))
-    
+    init_matrix = trajectory_processor.init_matrix(robot.get_current_endpose(), group_size=5)
+    robot.send_GPs(10, init_matrix)
+    robot.send_GPs(20, init_matrix)
+
     while True:
         loop_start = time.perf_counter()
 
@@ -178,33 +180,33 @@ def teleop_loop_crp(
         # _ = robot.send_endpose(crp_endpose_target)
 
 
-        # ######## GP点发送逻辑--单组
+        ######## GP点发送逻辑--单点
         # trajectory_processor.write_point(trajectory_processor.trajectory_differential(robot.get_current_endpose(), crp_endpose_target, step_length=100))
-        # # trajectory_processor.write_point(crp_endpose_target)
-        # # if not abs(robot.get_GI(0)-1) < 1e-3:
-        # #     print("in GI 1111111111111111111111111111111111111111111111")
-        # #     robot.set_GI(0, 1)
-        # #     robot.set_GI(1, 0)
+        trajectory_processor.write_point(crp_endpose_target)
+        robot.send_GPs(10, trajectory_processor.read_points())
+        
+        # ######## GP点发送逻辑--单组
+        # # trajectory_processor.write_point(trajectory_processor.trajectory_differential(robot.get_current_endpose(), crp_endpose_target, step_length=100))
+        # trajectory_processor.write_point(crp_endpose_target)
         # if abs(robot.get_GI(1)) < 1e-3:
         #     print("in GI", robot.get_GI(1))
         #     robot.send_GPs(10, trajectory_processor.read_points())
         #     robot.set_GI(1, 1)
 
-        ######## GP点发送逻辑--两组
-        trajectory_processor.write_point(crp_endpose_target)
+        # ######## GP点发送逻辑--两组
         # trajectory_processor.write_point(crp_endpose_target)
-        # if not abs(robot.get_GI(0)-1) < 1e-3:
-        #     print("in GI 1111111111111111111111111111111111111111111111")
-        #     robot.set_GI(0, 1)
-        #     robot.set_GI(1, 0)
-        if abs(robot.get_GI(2)-1) < 1e-3:
-            print("in G1")
-            robot.send_GPs(10, trajectory_processor.read_points())
-            robot.set_GI(2, 0)
-        if abs(robot.get_GI(2)-2) < 1e-3:
-            print("in G2")
-            robot.send_GPs(13, trajectory_processor.read_points())
-            robot.set_GI(2, 0)
+        # # trajectory_processor.write_point(crp_endpose_target)
+        # # if not abs(robot.get_GI(0)-1) < 1e-3:
+        # #     robot.set_GI(0, 1)
+        # #     robot.set_GI(1, 0)
+        # if abs(robot.get_GI(1)-2) < 1e-3:
+        #     print("in G1", trajectory_processor.read_points())
+        #     robot.send_GPs(10, trajectory_processor.read_points())
+        #     # robot.set_GI(2, 0)
+        # if abs(robot.get_GI(1)-1) < 1e-3:
+        #     print("in G2", trajectory_processor.read_points())
+        #     robot.send_GPs(20, trajectory_processor.read_points())
+        #     # robot.set_GI(2, 0)
 
 
 

@@ -106,7 +106,7 @@ class CRPArm(Robot):
         self.crp_arm_robot.connect(self.config.port)
         self.crp_arm_robot.servo_power_on()
         # self.crp_arm_robot.switch_work_mode(RobotMode.Manual)
-        # self.crp_arm_robot.switch_work_mode(RobotMode.Auto)
+        self.crp_arm_robot.switch_work_mode(RobotMode.Auto)
 
         for cam in self.cameras.values():
             cam.connect()
