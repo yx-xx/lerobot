@@ -3,7 +3,7 @@ from typing import List
 
 class TrajectoryProcessor:
 
-    def __init__(self, max_points: int = 5, max_joints: int = 5):
+    def __init__(self, max_points: int = 3, max_joints: int = 5):
         if max_points < 1:
             raise ValueError("max_points must be >= 1")
         self.max_points = int(max_points)
@@ -109,6 +109,19 @@ class TrajectoryProcessor:
     def read_joints(self) -> List[List[float]]:
         """Return a shallow copy of the stored joints list."""
         return [j[:] for j in self.joints]
+
+
+    def init_matrix(self, flat: List[float], group_size: int) -> List[List[float]]:
+        if not isinstance(flat, (list, tuple)):
+            raise ValueError("flat must be a list or tuple of numbers representing a single vector")
+        if not isinstance(group_size, int) or group_size < 1:
+            raise ValueError("group_size must be an int >= 1")
+
+        if len(flat) == 0:
+            return []
+
+        row = [float(x) for x in flat]
+        return [row[:] for _ in range(group_size)]
 
 
 if __name__ == "__main__":
