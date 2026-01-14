@@ -58,9 +58,9 @@ from pprint import pformat
 
 import rerun as rr
 
-from .tools import load_CrpRobotPy, get_endpose2Crp, TrajectoryProcessor, get_so101_endpose
+from .tools import load_CrpRobotPy, get_endpose2Crp, get_so101_endpose, TrajectoryProcessor, get_world_T_so101end, euler_to_rotation_matrix
 load_CrpRobotPy()
-# from CrpRobotPy import CrpRobotPy, RobotMode
+import numpy as np
 
 from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig  # noqa: F401
 from lerobot.cameras.realsense.configuration_realsense import RealSenseCameraConfig  # noqa: F401
@@ -164,27 +164,40 @@ def teleop_loop_crp(
         # Process action for robot through pipeline
         robot_action_to_send = robot_action_processor((teleop_action, obs))
 
-        # ###### 获取末端位置代码
+        # ###### 获取so101末端位置
         # so101_endpose = get_so101_endpose(robot_action_to_send)
-        # print(f"so101_endpose: {so101_endpose}")
+        # #print(f"so101_endpose: {so101_endpose}")
 
-        ###### 获取目标末端位置
+        ###### 获取CRP目标末端位置
         crp_endpose_target = get_endpose2Crp(robot_action_to_send)
-        # print(f"crp_endpose: {crp_endpose_target}")
+        print(f"crp_endpose: {crp_endpose_target}")
 
-        # ######获取当前末端位置
+        # ###### 获取当前末端位置
         # print(f"get_current_endpose: {robot.get_current_endpose()}")
 
+        ####### 获得so101end_T_crpend
+        world_T_so101end = get_world_T_so101end(robot_action_to_send)
+        # print(f"world_T_so101end: {world_T_so101end}")
+        CRPend = robot.get_current_endpose()
+        world_T_CRP = euler_to_rotation_matrix(CRPend[3:], seq='zyz', degrees=True)
+        # print(f"world_T_CRP: {world_T_CRP}")
+        so101end_T_crpend = np.linalg.inv(world_T_so101end) @ world_T_CRP
+        print(f"so101end_T_crpend: {so101end_T_crpend}")
+
+
+
         ###### 发送末端位置到CRP机械臂
+        ### RobotMode.Manual下运行
         # _ = robot.send_endpose(trajectory_processor.trajectory_differential(robot.get_current_endpose(), crp_endpose_target, step_length=20))
         # _ = robot.send_endpose(crp_endpose_target)
 
 
-        ######## GP点发送逻辑--单点
-        # trajectory_processor.write_point(trajectory_processor.trajectory_differential(robot.get_current_endpose(), crp_endpose_target, step_length=100))
-        trajectory_processor.write_point(crp_endpose_target)
-        robot.send_GPs(10, trajectory_processor.read_points())
-        
+        # ######## GP点发送逻辑--单点
+        # ### RobotMode.Auto下运行
+        # # trajectory_processor.write_point(trajectory_processor.trajectory_differential(robot.get_current_endpose(), crp_endpose_target, step_length=100))
+        # trajectory_processor.write_point(crp_endpose_target)
+        # robot.send_GPs(10, trajectory_processor.read_points())
+
         # ######## GP点发送逻辑--单组
         # # trajectory_processor.write_point(trajectory_processor.trajectory_differential(robot.get_current_endpose(), crp_endpose_target, step_length=100))
         # trajectory_processor.write_point(crp_endpose_target)
@@ -250,7 +263,7 @@ def teleoperate(cfg: TeleoperateConfig):
     robot.connect()
 
     print("当前速度比：", robot.get_speed_ratio())
-    robot.set_speed_ratio(100)
+    robot.set_speed_ratio(10)
     print("当前速度比：", robot.get_speed_ratio())
 
     trajectory_processor = TrajectoryProcessor()

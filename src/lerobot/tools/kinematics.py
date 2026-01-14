@@ -2,6 +2,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 import copy
 
+
 def create_so101_dh_params():
     """[a, alpha, d, theta]"""
     return [
@@ -22,11 +23,13 @@ def create_tool_transform():
     # ])
 
     return np.array([  
-        [0.9856216,  -0.13022117,  0.10766848,  0.0],
-        [0.16881813,  0.78573135, -0.59508544,  0.0],
-        [-0.00710578, 0.60470545,  0.79641749,  0.0],
-        [0.0,         0.0,         0.0,         1.0],
+        [ 0.77361042, -0.60289343, -0.19505494, -0.17153598],
+        [-0.62040729, -0.78328083, -0.03957183, -0.02838486],
+        [-0.1289252,   0.15162668, -0.97999369,  0.11239064],
+        [ 0.0,         0.0,         0.0,         1.0]
     ])
+
+
 
  
 def create_base_transform():
@@ -51,7 +54,6 @@ def dh_transform(a, alpha, d, theta):
     ])
 
 
-
 def map_range(value: float, input_min: float, input_max: float, output_min: float, output_max: float) -> float:
     """将数值从输入范围映射到输出范围"""
     # return (value - input_min) / (input_max - input_min) * (output_max - output_min) + output_min
@@ -60,10 +62,9 @@ def map_range(value: float, input_min: float, input_max: float, output_min: floa
     else:
         return (value / input_min) * output_min
 
+
 def so101_to_radian(action: dict[str, float]) -> list:
-
     action = copy.deepcopy(action)
-
     for key in action:
         action[key] = -action[key]
 
@@ -121,7 +122,7 @@ def forward_kinematics_so101(joint_angles: list[float]) -> list[float]:
     rotation_matrix = T_total[:3, :3]
     rot_obj = R.from_matrix(rotation_matrix)
     
-    roll, pitch, yaw = rot_obj.as_euler('xyz', degrees=False)
+    roll, pitch, yaw = rot_obj.as_euler('zyx', degrees=False)
     
     # print("末端位置 (X, Y, Z):", x, y, z)
 
@@ -219,10 +220,47 @@ def map_so2crp(end_pose: list[float]) -> list[float]:
     pitch_deg = np.degrees(pitch)
     yaw_deg = np.degrees(yaw)
     
-    return np.round([x_mapped, y_mapped, z_mapped, 179.969, -0.024, -123.208], 10).tolist()
-    # return np.round([490, 104, 217, roll_deg, pitch_deg, yaw_deg], 10).tolist()
+    # return np.round([x_mapped, y_mapped, z_mapped, 179.969, -0.024, -123.208], 10).tolist()
+    return np.round([490, 104, 217, roll_deg, pitch_deg, yaw_deg], 10).tolist()
 
     # return np.round([x_mapped, y_mapped, z_mapped, roll_deg, pitch_deg, yaw_deg], 10).tolist()
+
+
+def euler_to_rotation_matrix(euler_angles: list[float], seq: str = 'zyx', degrees: bool = False) -> np.ndarray:
+    if not isinstance(euler_angles, (list, tuple)):
+        raise ValueError("euler_angles must be a list or tuple of three numbers")
+    if len(euler_angles) != 3:
+        raise ValueError("euler_angles must have length 3: [a, b, c]")
+
+    rot = R.from_euler(seq, euler_angles, degrees=degrees)
+    Rmat = rot.as_matrix()
+    T = np.eye(4, dtype=float)
+    T[:3, :3] = Rmat
+    return T
+
+
+
+def get_world_T_so101end(action: dict[str, float])-> np.ndarray:
+    action_copy = copy.deepcopy(action)
+    joints_radian = so101_to_radian(action_copy)
+    joints_radian_5 = joints_radian[:5]
+    if len(joints_radian_5) != 5:
+        raise ValueError("需要5个关节角度")
+    
+    dh_params = create_so101_dh_params()
+    for i in range(5):
+        dh_params[i][3] = float(dh_params[i][3] + joints_radian_5[i])
+
+    T1 = dh_transform(*dh_params[0])
+    T2 = dh_transform(*dh_params[1])
+    T3 = dh_transform(*dh_params[2])
+    T4 = dh_transform(*dh_params[3])
+    T5 = dh_transform(*dh_params[4])
+
+    Tbase = create_base_transform()
+
+    T_total = Tbase @ T1 @ T2 @ T3 @ T4 @ T5
+    return T_total
 
 
 def get_so101_endpose(action: dict[str, float]):
