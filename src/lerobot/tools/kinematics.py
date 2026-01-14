@@ -23,15 +23,13 @@ def create_tool_transform():
     # ])
 
     return np.array([  
-        [ 0.77361042, -0.60289343, -0.19505494, -0.17153598],
-        [-0.62040729, -0.78328083, -0.03957183, -0.02838486],
-        [-0.1289252,   0.15162668, -0.97999369,  0.11239064],
+        [-0.81022953, -0.5713876,   0.1305539,  -0.24246398],
+        [ 0.57968883, -0.8141048,   0.03455758, -0.0435442],
+        [ 0.08653878,  0.10368021,  0.99083876, -0.27882195],
         [ 0.0,         0.0,         0.0,         1.0]
     ])
 
 
-
- 
 def create_base_transform():
     """so101_DH_to_CRPArm"""
     return np.array([
@@ -122,7 +120,7 @@ def forward_kinematics_so101(joint_angles: list[float]) -> list[float]:
     rotation_matrix = T_total[:3, :3]
     rot_obj = R.from_matrix(rotation_matrix)
     
-    roll, pitch, yaw = rot_obj.as_euler('zyx', degrees=False)
+    roll, pitch, yaw = rot_obj.as_euler('xyz', degrees=False)
     
     # print("末端位置 (X, Y, Z):", x, y, z)
 
@@ -163,7 +161,7 @@ def forward_kinematics(joint_angles: list[float]) -> list[float]:
     rotation_matrix = T_total[:3, :3]
     rot_obj = R.from_matrix(rotation_matrix)
     
-    roll, pitch, yaw = rot_obj.as_euler('zyx', degrees=False)
+    roll, pitch, yaw = rot_obj.as_euler('xyz', degrees=False)
     
     # print("末端位置 (X, Y, Z):", x, y, z)
     # print("末端姿态 (roll, pitch, yaw):", roll, pitch, yaw)
@@ -226,7 +224,7 @@ def map_so2crp(end_pose: list[float]) -> list[float]:
     # return np.round([x_mapped, y_mapped, z_mapped, roll_deg, pitch_deg, yaw_deg], 10).tolist()
 
 
-def euler_to_rotation_matrix(euler_angles: list[float], seq: str = 'zyx', degrees: bool = False) -> np.ndarray:
+def euler_to_rotation_matrix(euler_angles: list[float], seq: str = 'xyz', degrees: bool = False) -> np.ndarray:
     if not isinstance(euler_angles, (list, tuple)):
         raise ValueError("euler_angles must be a list or tuple of three numbers")
     if len(euler_angles) != 3:
