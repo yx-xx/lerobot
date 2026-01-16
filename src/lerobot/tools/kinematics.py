@@ -23,10 +23,10 @@ def create_tool_transform():
     # ])
 
     return np.array([  
-        [-0.81022953, -0.5713876,   0.1305539,  -0.24246398],
-        [ 0.57968883, -0.8141048,   0.03455758, -0.0435442],
-        [ 0.08653878,  0.10368021,  0.99083876, -0.27882195],
-        [ 0.0,         0.0,         0.0,         1.0]
+        [-0.81022953, -0.5713876,   0.1305539,  0.0],
+        [ 0.57968883, -0.8141048,   0.03455758, 0.0],
+        [ 0.08653878,  0.10368021,  0.99083876, 0.0],
+        [ 0.0,         0.0,         0.0,        1.0]
     ])
 
 
@@ -219,9 +219,9 @@ def map_so2crp(end_pose: list[float]) -> list[float]:
     yaw_deg = np.degrees(yaw)
     
     # return np.round([x_mapped, y_mapped, z_mapped, 179.969, -0.024, -123.208], 10).tolist()
-    return np.round([490, 104, 217, roll_deg, pitch_deg, yaw_deg], 10).tolist()
+    # return np.round([490, 104, 217, roll_deg, pitch_deg, yaw_deg], 10).tolist()
 
-    # return np.round([x_mapped, y_mapped, z_mapped, roll_deg, pitch_deg, yaw_deg], 10).tolist()
+    return np.round([x_mapped, y_mapped, z_mapped, roll_deg, pitch_deg, yaw_deg], 10).tolist()
 
 
 def euler_to_rotation_matrix(euler_angles: list[float], seq: str = 'xyz', degrees: bool = False) -> np.ndarray:

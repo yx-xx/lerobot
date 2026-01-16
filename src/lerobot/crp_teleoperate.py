@@ -189,14 +189,14 @@ def teleop_loop_crp(
         ###### 发送末端位置到CRP机械臂
         ### RobotMode.Manual下运行
         # _ = robot.send_endpose(trajectory_processor.trajectory_differential(robot.get_current_endpose(), crp_endpose_target, step_length=20))
-        _ = robot.send_endpose(crp_endpose_target)
+        # _ = robot.send_endpose(crp_endpose_target)
 
 
-        # ######## GP点发送逻辑--单点
-        # ### RobotMode.Auto下运行
-        # # trajectory_processor.write_point(trajectory_processor.trajectory_differential(robot.get_current_endpose(), crp_endpose_target, step_length=100))
-        # trajectory_processor.write_point(crp_endpose_target)
-        # robot.send_GPs(10, trajectory_processor.read_points())
+        ######## GP点发送逻辑--单点
+        ### RobotMode.Auto下运行
+        # trajectory_processor.write_point(trajectory_processor.trajectory_differential(robot.get_current_endpose(), crp_endpose_target, step_length=100))
+        trajectory_processor.write_point(crp_endpose_target)
+        robot.send_GPs(10, trajectory_processor.read_points())
 
         # ######## GP点发送逻辑--单组
         # # trajectory_processor.write_point(trajectory_processor.trajectory_differential(robot.get_current_endpose(), crp_endpose_target, step_length=100))
