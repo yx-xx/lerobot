@@ -222,7 +222,6 @@ def teleop_loop_crp(
         #     # robot.set_GI(2, 0)
 
 
-
         if display_data:
             # Process robot observation through pipeline
             obs_transition = robot_observation_processor(obs)
@@ -263,7 +262,7 @@ def teleoperate(cfg: TeleoperateConfig):
     robot.connect()
 
     print("当前速度比：", robot.get_speed_ratio())
-    robot.set_speed_ratio(50)
+    robot.set_speed_ratio(100)
     print("当前速度比：", robot.get_speed_ratio())
 
     trajectory_processor = TrajectoryProcessor()

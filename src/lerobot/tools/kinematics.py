@@ -39,6 +39,16 @@ def create_base_transform():
         [0.0, 0.0, 0.0, 1.0]
     ])
 
+
+def create_omy_base_transform():
+    """oMY_L100_to_CRPArm"""
+    return np.array([
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0]
+    ])
+
 def dh_transform(a, alpha, d, theta):
     cos_t = np.cos(theta)
     sin_t = np.sin(theta)
@@ -169,6 +179,13 @@ def forward_kinematics(joint_angles: list[float]) -> list[float]:
     return np.round([x, y, z, roll, pitch, yaw], 10).tolist()
 
 
+def linear_map(value: float, in_min: float, in_max: float, out_min: float, out_max: float) -> float:
+    """标准线性映射"""
+    if in_max == in_min:
+        return out_min
+    return (value - in_min) / (in_max - in_min) * (out_max - out_min) + out_min
+
+
 def map_so2crp(end_pose: list[float]) -> list[float]:
     """
     输入: so101 - [x, y, z, roll, pitch, yaw]
@@ -196,13 +213,6 @@ def map_so2crp(end_pose: list[float]) -> list[float]:
     x_clipped = np.clip(x, so101_x_range[0], so101_x_range[1])
     y_clipped = np.clip(y, so101_y_range[0], so101_y_range[1])
     z_clipped = np.clip(z, so101_z_range[0], so101_z_range[1])
-
-    # 映射位置: 从 SO101 范围映射到 CRPArm 范围 (使用标准线性映射)
-    def linear_map(value: float, in_min: float, in_max: float, out_min: float, out_max: float) -> float:
-        """标准线性映射"""
-        if in_max == in_min:
-            return out_min
-        return (value - in_min) / (in_max - in_min) * (out_max - out_min) + out_min
     
     x_mapped = linear_map(x_clipped, so101_x_range[0], so101_x_range[1], crp_x_range[0], crp_x_range[1])
     y_mapped = linear_map(y_clipped, so101_y_range[0], so101_y_range[1], crp_y_range[0], crp_y_range[1])
@@ -224,6 +234,77 @@ def map_so2crp(end_pose: list[float]) -> list[float]:
     return np.round([x_mapped, y_mapped, z_mapped, roll_deg, pitch_deg, yaw_deg], 10).tolist()
 
 
+def map_omy2crp(end_pose: list[float]) -> list[float]:
+    """
+    输入: OMY_L100 - [x, y, z, roll, pitch, yaw]
+    输出: CRPArm - [x, y, z, roll, pitch, yaw]
+    
+    位置映射: 从 OMY_L100 的位置范围映射到 CRPArm 的位置范围
+    姿态转换: OMY_L100 使用弧度，CRPArm 使用角度
+    """
+    if len(end_pose) != 6:
+        raise ValueError("end_pose 必须包含6个值: [x, y, z, roll, pitch, yaw]")
+    
+    x, y, z, roll, pitch, yaw = end_pose
+
+    # OMY_L100 位置范围 m
+    omy_x_range = (0.05, 0.25)  # (min, max)
+    omy_y_range = (-0.25, 0.25)  # (min, max)
+    omy_z_range = (-0.10, 0.20)   # (min, max)
+    
+    # CRPArm 位置范围 mm
+    crp_x_range = (320, 760)    # (min, max)
+    crp_y_range = (-190, 400)    # (min, max)
+    crp_z_range = (-315, 270)     # (min, max)
+    
+    # 限制输入值到 OMY_L100 的范围内，确保安全
+    x_clipped = np.clip(x, omy_x_range[0], omy_x_range[1])
+    y_clipped = np.clip(y, omy_y_range[0], omy_y_range[1])
+    z_clipped = np.clip(z, omy_z_range[0], omy_z_range[1])
+    
+    x_mapped = linear_map(x_clipped, omy_x_range[0], omy_x_range[1], crp_x_range[0], crp_x_range[1])
+    y_mapped = linear_map(y_clipped, omy_y_range[0], omy_y_range[1], crp_y_range[0], crp_y_range[1])
+    z_mapped = linear_map(z_clipped, omy_z_range[0], omy_z_range[1], crp_z_range[0], crp_z_range[1])
+    
+    # 限制输出值到 CRPArm 的范围内，确保安全
+    x_mapped = np.clip(x_mapped, crp_x_range[0], crp_x_range[1])
+    y_mapped = np.clip(y_mapped, crp_y_range[0], crp_y_range[1])
+    z_mapped = np.clip(z_mapped, crp_z_range[0], crp_z_range[1])
+    
+    # 转换姿态: 从弧度转换为角度
+    roll_deg = np.degrees(roll)
+    pitch_deg = np.degrees(pitch)
+    yaw_deg = np.degrees(yaw)
+
+    return np.round([x_mapped, y_mapped, z_mapped, roll_deg, pitch_deg, yaw_deg], 10).tolist()
+
+
+
+
+
+def get_so101_endpose(action: dict[str, float]):
+    action_copy = copy.deepcopy(action)
+    joints_radian = so101_to_radian(action_copy)
+    return forward_kinematics_so101(joints_radian[:5])
+
+
+def get_endpose2Crp(action: dict[str, float]):
+    action_copy = copy.deepcopy(action)
+    joints_radian = so101_to_radian(action_copy)
+    return map_so2crp(forward_kinematics(joints_radian[:5]))
+
+
+def get_omy_endpose2Crp(action: dict[str, float]):
+    action_copy = copy.deepcopy(action)
+    joints_radian = so101_to_radian(action_copy)
+    return map_omy2crp(forward_kinematics(joints_radian[:5]))
+
+
+
+
+
+
+
 def euler_to_rotation_matrix(euler_angles: list[float], seq: str = 'xyz', degrees: bool = False) -> np.ndarray:
     if not isinstance(euler_angles, (list, tuple)):
         raise ValueError("euler_angles must be a list or tuple of three numbers")
@@ -235,8 +316,6 @@ def euler_to_rotation_matrix(euler_angles: list[float], seq: str = 'xyz', degree
     T = np.eye(4, dtype=float)
     T[:3, :3] = Rmat
     return T
-
-
 
 def get_world_T_so101end(action: dict[str, float])-> np.ndarray:
     action_copy = copy.deepcopy(action)
@@ -260,17 +339,6 @@ def get_world_T_so101end(action: dict[str, float])-> np.ndarray:
     T_total = Tbase @ T1 @ T2 @ T3 @ T4 @ T5
     return T_total
 
-
-def get_so101_endpose(action: dict[str, float]):
-    action_copy = copy.deepcopy(action)
-    joints_radian = so101_to_radian(action_copy)
-    return forward_kinematics_so101(joints_radian[:5])
-
-
-def get_endpose2Crp(action: dict[str, float]):
-    action_copy = copy.deepcopy(action)
-    joints_radian = so101_to_radian(action_copy)
-    return map_so2crp(forward_kinematics(joints_radian[:5]))
 
 
 
