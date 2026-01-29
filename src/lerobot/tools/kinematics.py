@@ -41,7 +41,7 @@ def create_base_transform():
 
 
 def create_omy_base_transform():
-    """oMY_L100_to_CRPArm"""
+    """CRPArm_T_OMY"""
     return np.array([
         [1.0, 0.0, 0.0, 0.0],
         [0.0, 1.0, 0.0, 0.0],
@@ -282,6 +282,7 @@ def map_omy2crp(end_pose: list[float]) -> list[float]:
 
 
 
+
 def get_so101_endpose(action: dict[str, float]):
     action_copy = copy.deepcopy(action)
     joints_radian = so101_to_radian(action_copy)
@@ -294,10 +295,34 @@ def get_endpose2Crp(action: dict[str, float]):
     return map_so2crp(forward_kinematics(joints_radian[:5]))
 
 
-def get_omy_endpose2Crp(action: dict[str, float]):
-    action_copy = copy.deepcopy(action)
-    joints_radian = so101_to_radian(action_copy)
-    return map_omy2crp(forward_kinematics(joints_radian[:5]))
+def get_omy_endpose2Crp(end_pose: list[float]):
+    # 校验输入格式
+    if not isinstance(end_pose, (list, tuple, np.ndarray)):
+            raise ValueError("end_pose 必须是 list/tuple/ndarray，形如 [x,y,z,roll,pitch,yaw]")
+    if len(end_pose) != 6:
+            raise ValueError("end_pose 必须包含6个元素: [x, y, z, roll, pitch, yaw]")
+
+    x, y, z, roll_deg, pitch_deg, yaw_deg = [float(v) for v in end_pose]
+
+    # 转弧度（输入为度）
+    roll = np.radians(roll_deg)
+    pitch = np.radians(pitch_deg)
+    yaw = np.radians(yaw_deg)
+    # 变成齐次矩阵（使用 xyz 顺序）
+    T = euler_to_rotation_matrix([roll, pitch, yaw], seq='xyz', degrees=False)
+    T[0, 3] = x
+    T[1, 3] = y
+    T[2, 3] = z
+    # 乘以基变换矩阵（OMY -> CRP）
+    Tomy_base = create_omy_base_transform()
+    T_total = Tomy_base @ T
+    # 转欧拉角（结果为弧度）
+    x2, y2, z2 = T_total[0, 3], T_total[1, 3], T_total[2, 3]
+    rot_obj = R.from_matrix(T_total[:3, :3])
+    roll2, pitch2, yaw2 = rot_obj.as_euler('xyz', degrees=False)
+
+    # 输入 map_omy2crp（map_omy2crp 会把弧度转成角度并执行位置映射）
+    return map_omy2crp([x2, y2, z2, roll2, pitch2, yaw2])
 
 
 
