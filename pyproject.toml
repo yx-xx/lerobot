@@ -171,6 +171,7 @@ lerobot-replay="lerobot.replay:main"
 lerobot-setup-motors="lerobot.setup_motors:main"
 lerobot-teleoperate="lerobot.teleoperate:main"
 lerobot-crp_teleoperate="lerobot.crp_teleoperate:main"
+lerobot-crp_tele_omy="lerobot.crp_tele_omy:main"
 lerobot-eval="lerobot.scripts.eval:main"
 lerobot-train="lerobot.scripts.train:main"
 

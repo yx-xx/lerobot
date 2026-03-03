@@ -24,5 +24,7 @@ from ..config import TeleoperatorConfig
 class OMYL100Config(TeleoperatorConfig):
     # Port to connect to the arm
     port: str
-
+    
     use_degrees: bool = False
+
+

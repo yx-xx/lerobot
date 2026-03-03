@@ -30,6 +30,23 @@ def create_tool_transform():
     ])
 
 
+def create_toolOMY_transform():
+    """OMY_T_crpend"""
+    # return np.array([
+    #     [1.0, 0.0, 0.0, 0.0],
+    #     [0.0, 1.0, 0.0, 0.0],
+    #     [0.0, 0.0, 1.0, 0.0],
+    #     [0.0, 0.0, 0.0, 1.0]
+    # ])
+
+    return np.array([  
+        [-0.81022953, -0.5713876,   0.1305539,  0.0],
+        [ 0.57968883, -0.8141048,   0.03455758, 0.0],
+        [ 0.08653878,  0.10368021,  0.99083876, 0.0],
+        [ 0.0,         0.0,         0.0,        1.0]
+    ])
+
+
 def create_base_transform():
     """so101_DH_to_CRPArm"""
     return np.array([
@@ -40,14 +57,14 @@ def create_base_transform():
     ])
 
 
-def create_omy_base_transform():
-    """CRPArm_T_OMY"""
-    return np.array([
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.0],
-        [0.0, 0.0, 0.0, 1.0]
-    ])
+# def create_omy_base_transform():
+#     """CRPArm_T_OMY"""
+#     return np.array([
+#         [1.0, 0.0, 0.0, 0.0],
+#         [0.0, 1.0, 0.0, 0.0],
+#         [0.0, 0.0, 1.0, 0.0],
+#         [0.0, 0.0, 0.0, 1.0]
+#     ])
 
 def dh_transform(a, alpha, d, theta):
     cos_t = np.cos(theta)
@@ -234,49 +251,7 @@ def map_so2crp(end_pose: list[float]) -> list[float]:
     return np.round([x_mapped, y_mapped, z_mapped, roll_deg, pitch_deg, yaw_deg], 10).tolist()
 
 
-def map_omy2crp(end_pose: list[float]) -> list[float]:
-    """
-    输入: OMY_L100 - [x, y, z, roll, pitch, yaw]
-    输出: CRPArm - [x, y, z, roll, pitch, yaw]
-    
-    位置映射: 从 OMY_L100 的位置范围映射到 CRPArm 的位置范围
-    姿态转换: OMY_L100 使用弧度，CRPArm 使用角度
-    """
-    if len(end_pose) != 6:
-        raise ValueError("end_pose 必须包含6个值: [x, y, z, roll, pitch, yaw]")
-    
-    x, y, z, roll, pitch, yaw = end_pose
 
-    # OMY_L100 位置范围 m
-    omy_x_range = (0.05, 0.25)  # (min, max)
-    omy_y_range = (-0.25, 0.25)  # (min, max)
-    omy_z_range = (-0.10, 0.20)   # (min, max)
-    
-    # CRPArm 位置范围 mm
-    crp_x_range = (320, 760)    # (min, max)
-    crp_y_range = (-190, 400)    # (min, max)
-    crp_z_range = (-315, 270)     # (min, max)
-    
-    # 限制输入值到 OMY_L100 的范围内，确保安全
-    x_clipped = np.clip(x, omy_x_range[0], omy_x_range[1])
-    y_clipped = np.clip(y, omy_y_range[0], omy_y_range[1])
-    z_clipped = np.clip(z, omy_z_range[0], omy_z_range[1])
-    
-    x_mapped = linear_map(x_clipped, omy_x_range[0], omy_x_range[1], crp_x_range[0], crp_x_range[1])
-    y_mapped = linear_map(y_clipped, omy_y_range[0], omy_y_range[1], crp_y_range[0], crp_y_range[1])
-    z_mapped = linear_map(z_clipped, omy_z_range[0], omy_z_range[1], crp_z_range[0], crp_z_range[1])
-    
-    # 限制输出值到 CRPArm 的范围内，确保安全
-    x_mapped = np.clip(x_mapped, crp_x_range[0], crp_x_range[1])
-    y_mapped = np.clip(y_mapped, crp_y_range[0], crp_y_range[1])
-    z_mapped = np.clip(z_mapped, crp_z_range[0], crp_z_range[1])
-    
-    # 转换姿态: 从弧度转换为角度
-    roll_deg = np.degrees(roll)
-    pitch_deg = np.degrees(pitch)
-    yaw_deg = np.degrees(yaw)
-
-    return np.round([x_mapped, y_mapped, z_mapped, roll_deg, pitch_deg, yaw_deg], 10).tolist()
 
 
 
@@ -295,34 +270,76 @@ def get_endpose2Crp(action: dict[str, float]):
     return map_so2crp(forward_kinematics(joints_radian[:5]))
 
 
-def get_omy_endpose2Crp(end_pose: list[float]):
-    # 校验输入格式
-    if not isinstance(end_pose, (list, tuple, np.ndarray)):
-            raise ValueError("end_pose 必须是 list/tuple/ndarray，形如 [x,y,z,roll,pitch,yaw]")
+
+
+
+
+
+
+
+
+
+
+
+def map_omy2crp(end_pose: list[float]) -> list[float]:
+    """
+    输入: OMY_L100 - [x, y, z, roll, pitch, yaw]毫米角度
+    输出: CRPArm - [x, y, z, roll, pitch, yaw]毫米角度
+    
+    映射: 从 OMY_L100 的范围映射到 CRPArm 的范围
+    """
     if len(end_pose) != 6:
-            raise ValueError("end_pose 必须包含6个元素: [x, y, z, roll, pitch, yaw]")
+        raise ValueError("end_pose 必须包含6个值: [x, y, z, roll, pitch, yaw]")
+    
+    x, y, z, roll_deg, pitch_deg, yaw_deg = end_pose
 
-    x, y, z, roll_deg, pitch_deg, yaw_deg = [float(v) for v in end_pose]
+    # OMY_L100 位置范围 m
+    omy_x_range = (40, 470)  # (min, max)
+    omy_y_range = (-330, 330)  # (min, max)
+    omy_z_range = (250, 700)   # (min, max)
+    
+    # CRPArm 位置范围 mm
+    crp_x_range = (320, 760)    # (min, max)
+    crp_y_range = (-190, 400)    # (min, max)
+    crp_z_range = (-315, 270)     # (min, max)
+    
+    # 限制输入值到 OMY_L100 的范围内，确保安全
+    x_clipped = np.clip(x, omy_x_range[0], omy_x_range[1])
+    y_clipped = np.clip(y, omy_y_range[0], omy_y_range[1])
+    z_clipped = np.clip(z, omy_z_range[0], omy_z_range[1])
 
-    # 转弧度（输入为度）
-    roll = np.radians(roll_deg)
-    pitch = np.radians(pitch_deg)
-    yaw = np.radians(yaw_deg)
-    # 变成齐次矩阵（使用 xyz 顺序）
-    T = euler_to_rotation_matrix([roll, pitch, yaw], seq='xyz', degrees=False)
-    T[0, 3] = x
-    T[1, 3] = y
-    T[2, 3] = z
-    # 乘以基变换矩阵（OMY -> CRP）
-    Tomy_base = create_omy_base_transform()
-    T_total = Tomy_base @ T
-    # 转欧拉角（结果为弧度）
-    x2, y2, z2 = T_total[0, 3], T_total[1, 3], T_total[2, 3]
-    rot_obj = R.from_matrix(T_total[:3, :3])
-    roll2, pitch2, yaw2 = rot_obj.as_euler('xyz', degrees=False)
+    x_mapped = linear_map(x_clipped, omy_x_range[0], omy_x_range[1], crp_x_range[0], crp_x_range[1])
+    y_mapped = linear_map(y_clipped, omy_y_range[0], omy_y_range[1], crp_y_range[0], crp_y_range[1])
+    z_mapped = linear_map(z_clipped, omy_z_range[0], omy_z_range[1], crp_z_range[0], crp_z_range[1])
+    
+    # 限制输出值到 CRPArm 的范围内，确保安全
+    x_mapped = np.clip(x_mapped, crp_x_range[0], crp_x_range[1])
+    y_mapped = np.clip(y_mapped, crp_y_range[0], crp_y_range[1])
+    z_mapped = np.clip(z_mapped, crp_z_range[0], crp_z_range[1])
 
-    # 输入 map_omy2crp（map_omy2crp 会把弧度转成角度并执行位置映射）
-    return map_omy2crp([x2, y2, z2, roll2, pitch2, yaw2])
+    return np.round([x_mapped, y_mapped, z_mapped, roll_deg, pitch_deg, yaw_deg], 10).tolist()
+
+
+def get_omy_endpose2Crp(end_pose):
+
+    required_keys = {"ee.x", "ee.y", "ee.z", "ee.roll", "ee.pitch", "ee.yaw"}
+    if not required_keys.issubset(set(end_pose.keys())):
+        raise ValueError(f"字典必须包含键: {sorted(required_keys)}")
+
+    try:
+        x = float(end_pose["ee.x"])
+        y = float(end_pose["ee.y"])
+        z = float(end_pose["ee.z"])
+        roll_deg = float(end_pose["ee.roll"])
+        pitch_deg = float(end_pose["ee.pitch"])
+        yaw_deg = float(end_pose["ee.yaw"])
+
+    except Exception as e:
+        raise ValueError(f"无法从字典中解析数值: {e}")
+
+    return map_omy2crp([x, y, z, 179.969, -0.024, -123.208])
+    # return map_omy2crp([x, y, z, roll_deg, pitch_deg, yaw_deg])
+
 
 
 

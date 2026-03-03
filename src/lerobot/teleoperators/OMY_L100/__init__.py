@@ -14,5 +14,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .config_OMY_L100 import SO101LeaderConfig
-from .OMY_L100 import SO101Leader
+from .config_OMY_L100 import OMYL100Config
+from .OMY_L100 import OMYL100

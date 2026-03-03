@@ -33,6 +33,18 @@ lerobot-crp_teleoperate \
     --teleop.port=/dev/ttyACM0 \
     --teleop.id=mycong
 
+#OMY遥操作
+conda activate lerobotx
+
+lerobot-crp_tele_omy \
+    --robot.type=crp_arm \
+    --robot.port=192.168.0.100 \
+    --robot.id=crobotp \
+    --teleop.type=OMY_L100 \
+    --teleop.port=0 \
+    --teleop.id=omy
+
+
 
 
 # 摄像头

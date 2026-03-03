@@ -58,7 +58,15 @@ from pprint import pformat
 
 import rerun as rr
 
-from .tools import load_CrpRobotPy, get_endpose2Crp, get_so101_endpose, TrajectoryProcessor, get_world_T_so101end, euler_to_rotation_matrix
+from .tools import (
+    load_CrpRobotPy, 
+    get_endpose2Crp, 
+    get_so101_endpose, 
+    TrajectoryProcessor, 
+    get_omy_endpose2Crp, 
+    euler_to_rotation_matrix,
+)
+
 load_CrpRobotPy()
 import numpy as np
 
@@ -92,6 +100,7 @@ from lerobot.teleoperators import (  # noqa: F401
     make_teleoperator_from_config,
     so100_leader,
     so101_leader,
+    OMY_L100,
 )
 from lerobot.utils.robot_utils import busy_wait
 from lerobot.utils.utils import init_logging, move_cursor_up
@@ -164,62 +173,35 @@ def teleop_loop_crp(
         # Process action for robot through pipeline
         robot_action_to_send = robot_action_processor((teleop_action, obs))
 
-        # ###### 获取so101末端位置
-        # so101_endpose = get_so101_endpose(robot_action_to_send)
-        # #print(f"so101_endpose: {so101_endpose}")
-
         ###### 获取CRP目标末端位置
-        crp_endpose_target = get_endpose2Crp(robot_action_to_send)
+        crp_endpose_target = get_omy_endpose2Crp(robot_action_to_send)
         print(f"crp_endpose: {crp_endpose_target}")
+
+
+        ####### 获得omy_T_crpend
+        roll_deg = float(robot_action_to_send.get('ee.roll', crp_endpose_target[3]))
+        pitch_deg = float(robot_action_to_send.get('ee.pitch', crp_endpose_target[4]))
+        yaw_deg = float(robot_action_to_send.get('ee.yaw', crp_endpose_target[5]))
+        world_T_omy = euler_to_rotation_matrix([roll_deg, pitch_deg, yaw_deg], seq='xyz', degrees=True)
+        # print(f"world_T_omy: {world_T_omy}")
+        CRPend = robot.get_current_endpose()
+        world_T_CRP = euler_to_rotation_matrix(CRPend[3:], seq='xyz', degrees=True)
+        # print(f"world_T_CRP: {world_T_CRP}")
+        omy_T_crpend = np.linalg.inv(world_T_omy) @ world_T_CRP
+        print(f"omy_T_crpend: {omy_T_crpend}")
+
 
         # ###### 获取当前末端位置
         # print(f"get_current_endpose: {robot.get_current_endpose()}")
-
-        # ####### 获得so101end_T_crpend
-        # world_T_so101end = get_world_T_so101end(robot_action_to_send)
-        # # print(f"world_T_so101end: {world_T_so101end}")
-        # CRPend = robot.get_current_endpose()
-        # world_T_CRP = euler_to_rotation_matrix(CRPend[3:], seq='xyz', degrees=True)
-        # # print(f"world_T_CRP: {world_T_CRP}")
-        # so101end_T_crpend = np.linalg.inv(world_T_so101end) @ world_T_CRP
-        # print(f"so101end_T_crpend: {so101end_T_crpend}")
-
-
 
         ###### 发送末端位置到CRP机械臂
         ### RobotMode.Manual下运行
         # _ = robot.send_endpose(trajectory_processor.trajectory_differential(robot.get_current_endpose(), crp_endpose_target, step_length=20))
         # _ = robot.send_endpose(crp_endpose_target)
 
-
-        ######## GP点发送逻辑--单点
-        ### RobotMode.Auto下运行
-        # trajectory_processor.write_point(trajectory_processor.trajectory_differential(robot.get_current_endpose(), crp_endpose_target, step_length=100))
+        ##### 设置GP点
         trajectory_processor.write_point(crp_endpose_target)
         robot.send_GPs(10, trajectory_processor.read_points())
-
-        # ######## GP点发送逻辑--单组
-        # # trajectory_processor.write_point(trajectory_processor.trajectory_differential(robot.get_current_endpose(), crp_endpose_target, step_length=100))
-        # trajectory_processor.write_point(crp_endpose_target)
-        # if abs(robot.get_GI(1)) < 1e-3:
-        #     print("in GI", robot.get_GI(1))
-        #     robot.send_GPs(10, trajectory_processor.read_points())
-        #     robot.set_GI(1, 1)
-
-        # ######## GP点发送逻辑--两组
-        # trajectory_processor.write_point(crp_endpose_target)
-        # # trajectory_processor.write_point(crp_endpose_target)
-        # # if not abs(robot.get_GI(0)-1) < 1e-3:
-        # #     robot.set_GI(0, 1)
-        # #     robot.set_GI(1, 0)
-        # if abs(robot.get_GI(1)-2) < 1e-3:
-        #     print("in G1", trajectory_processor.read_points())
-        #     robot.send_GPs(10, trajectory_processor.read_points())
-        #     # robot.set_GI(2, 0)
-        # if abs(robot.get_GI(1)-1) < 1e-3:
-        #     print("in G2", trajectory_processor.read_points())
-        #     robot.send_GPs(20, trajectory_processor.read_points())
-        #     # robot.set_GI(2, 0)
 
 
         if display_data:
@@ -262,7 +244,7 @@ def teleoperate(cfg: TeleoperateConfig):
     robot.connect()
 
     print("当前速度比：", robot.get_speed_ratio())
-    robot.set_speed_ratio(100)
+    robot.set_speed_ratio(10)
     print("当前速度比：", robot.get_speed_ratio())
 
     trajectory_processor = TrajectoryProcessor()
