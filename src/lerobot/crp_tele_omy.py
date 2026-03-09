@@ -175,20 +175,20 @@ def teleop_loop_crp(
 
         ###### 获取CRP目标末端位置
         crp_endpose_target = get_omy_endpose2Crp(robot_action_to_send)
-        print(f"crp_endpose: {crp_endpose_target}")
+        # print(f"crp_endpose: {crp_endpose_target}")
 
 
-        ####### 获得omy_T_crpend
-        roll_deg = float(robot_action_to_send.get('ee.roll', crp_endpose_target[3]))
-        pitch_deg = float(robot_action_to_send.get('ee.pitch', crp_endpose_target[4]))
-        yaw_deg = float(robot_action_to_send.get('ee.yaw', crp_endpose_target[5]))
-        world_T_omy = euler_to_rotation_matrix([roll_deg, pitch_deg, yaw_deg], seq='xyz', degrees=True)
-        # print(f"world_T_omy: {world_T_omy}")
-        CRPend = robot.get_current_endpose()
-        world_T_CRP = euler_to_rotation_matrix(CRPend[3:], seq='xyz', degrees=True)
-        # print(f"world_T_CRP: {world_T_CRP}")
-        omy_T_crpend = np.linalg.inv(world_T_omy) @ world_T_CRP
-        print(f"omy_T_crpend: {omy_T_crpend}")
+        # ####### 获得omy_T_crpend
+        # roll_deg = float(robot_action_to_send.get('ee.roll', crp_endpose_target[3]))
+        # pitch_deg = float(robot_action_to_send.get('ee.pitch', crp_endpose_target[4]))
+        # yaw_deg = float(robot_action_to_send.get('ee.yaw', crp_endpose_target[5]))
+        # world_T_omy = euler_to_rotation_matrix([roll_deg, pitch_deg, yaw_deg], seq='xyz', degrees=True)
+        # # print(f"world_T_omy: {world_T_omy}")
+        # CRPend = robot.get_current_endpose()
+        # world_T_CRP = euler_to_rotation_matrix(CRPend[3:], seq='xyz', degrees=True)
+        # # print(f"world_T_CRP: {world_T_CRP}")
+        # omy_T_crpend = np.linalg.inv(world_T_omy) @ world_T_CRP
+        # print(f"omy_T_crpend: {omy_T_crpend}")
 
 
         # ###### 获取当前末端位置

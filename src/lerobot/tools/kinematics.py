@@ -334,6 +334,8 @@ def get_omy_endpose2Crp(end_pose):
         pitch_deg = float(end_pose["ee.pitch"])
         yaw_deg = float(end_pose["ee.yaw"])
 
+        print(f"omy_endpose: roll={roll_deg}, pitch={pitch_deg}, yaw={yaw_deg}")
+
     except Exception as e:
         raise ValueError(f"无法从字典中解析数值: {e}")
 
