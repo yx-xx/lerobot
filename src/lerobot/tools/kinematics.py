@@ -32,19 +32,13 @@ def create_tool_transform():
 
 def create_toolOMY_transform():
     """OMY_T_crpend"""
-    # return np.array([
-    #     [1.0, 0.0, 0.0, 0.0],
-    #     [0.0, 1.0, 0.0, 0.0],
-    #     [0.0, 0.0, 1.0, 0.0],
-    #     [0.0, 0.0, 0.0, 1.0]
-    # ])
-
-    return np.array([  
-        [-0.81022953, -0.5713876,   0.1305539,  0.0],
-        [ 0.57968883, -0.8141048,   0.03455758, 0.0],
-        [ 0.08653878,  0.10368021,  0.99083876, 0.0],
-        [ 0.0,         0.0,         0.0,        1.0]
+    return np.array([
+        [0.0, -1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0]
     ])
+
 
 
 def create_base_transform():
@@ -301,7 +295,7 @@ def map_omy2crp(end_pose: list[float]) -> list[float]:
     # CRPArm 位置范围 mm
     crp_x_range = (320, 760)    # (min, max)
     crp_y_range = (-190, 400)    # (min, max)
-    crp_z_range = (-315, 270)     # (min, max)
+    crp_z_range = (-315, 400)     # (min, max)
     
     # 限制输入值到 OMY_L100 的范围内，确保安全
     x_clipped = np.clip(x, omy_x_range[0], omy_x_range[1])
@@ -319,7 +313,7 @@ def map_omy2crp(end_pose: list[float]) -> list[float]:
 
     return np.round([x_mapped, y_mapped, z_mapped, roll_deg, pitch_deg, yaw_deg], 10).tolist()
 
-
+ 
 def get_omy_endpose2Crp(end_pose):
 
     required_keys = {"ee.x", "ee.y", "ee.z", "ee.roll", "ee.pitch", "ee.yaw"}
@@ -335,12 +329,26 @@ def get_omy_endpose2Crp(end_pose):
         yaw_deg = float(end_pose["ee.yaw"])
 
         print(f"omy_endpose: roll={roll_deg}, pitch={pitch_deg}, yaw={yaw_deg}")
-
+        
     except Exception as e:
         raise ValueError(f"无法从字典中解析数值: {e}")
 
-    return map_omy2crp([x, y, z, 179.969, -0.024, -123.208])
-    # return map_omy2crp([x, y, z, roll_deg, pitch_deg, yaw_deg])
+    # 将输入位姿（基坐标下的 OMY 末端）转为齐次坐标矩阵
+    T_omy = np.eye(4)
+    T_omy[:3, :3] = R.from_euler("xyz", [roll_deg, pitch_deg, yaw_deg], degrees=True).as_matrix()
+    T_omy[:3, 3] = [x, y, z]
+
+    # 右乘 create_toolOMY_transform (OMY_T_crpend)
+    T_tool_omy = create_toolOMY_transform()
+    T_result = T_omy @ T_tool_omy
+
+    # 从结果矩阵提取六个值 [x, y, z, roll, pitch, yaw]（角度为度）
+    x_new, y_new, z_new = T_result[0, 3], T_result[1, 3], T_result[2, 3]
+    rot_obj = R.from_matrix(T_result[:3, :3])
+    roll_new, pitch_new, yaw_new = rot_obj.as_euler("xyz", degrees=True)
+
+    # 位置姿态矩阵不同
+    return map_omy2crp([x, y, z, roll_new, pitch_new, yaw_new])
 
 
 
