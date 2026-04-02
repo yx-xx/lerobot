@@ -31,13 +31,20 @@ def create_tool_transform():
 
 
 def create_toolOMY_transform():
-    """OMY_T_crpend"""
+    """OMYend_T_crpend"""
     return np.array([
-        [0.0, -1.0, 0.0, 0.0],
-        [-1.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, -1.0, 0.0],
         [0.0, 0.0, 0.0, 1.0]
     ])
+
+    # return np.array([
+    #     [0.0, -1.0, 0.0, 0.0],
+    #     [-1.0, 0.0, 0.0, 0.0],
+    #     [0.0, 0.0, -1.0, 0.0],
+    #     [0.0, 0.0, 0.0, 1.0]
+    # ])
 
 
 
@@ -46,6 +53,16 @@ def create_base_transform():
     return np.array([
         [1.0, 0.0, 0.0, 0.0],
         [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0]
+    ])
+
+
+def create_base_transform_crpomy():
+    """CRPBase_to_OMYBase"""
+    return np.array([
+        [0.0, -1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0, 0.0],
         [0.0, 0.0, 1.0, 0.0],
         [0.0, 0.0, 0.0, 1.0]
     ])
@@ -293,9 +310,9 @@ def map_omy2crp(end_pose: list[float]) -> list[float]:
     omy_z_range = (250, 700)   # (min, max)
     
     # CRPArm 位置范围 mm
-    crp_x_range = (320, 760)    # (min, max)
-    crp_y_range = (-190, 400)    # (min, max)
-    crp_z_range = (-315, 400)     # (min, max)
+    crp_x_range = (320, 800)    # (min, max)
+    crp_y_range = (-400, 400)    # (min, max)
+    crp_z_range = (-300, 300)     # (min, max)
     
     # 限制输入值到 OMY_L100 的范围内，确保安全
     x_clipped = np.clip(x, omy_x_range[0], omy_x_range[1])
@@ -338,17 +355,38 @@ def get_omy_endpose2Crp(end_pose):
     T_omy[:3, :3] = R.from_euler("xyz", [roll_deg, pitch_deg, yaw_deg], degrees=True).as_matrix()
     T_omy[:3, 3] = [x, y, z]
 
-    # 右乘 create_toolOMY_transform (OMY_T_crpend)
+
+    T_extra1 = np.array([
+        [0.0, 1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0]
+    ])
+
+    T_extra2 = np.array([
+        [0.0, 1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0]
+    ])
+
+
+    T_crpomy = create_base_transform_crpomy()
     T_tool_omy = create_toolOMY_transform()
-    T_result = T_omy @ T_tool_omy
+    # T_result = T_crpomy @ T_omy @ T_tool_omy
+    # T_result = T_extra1 @ T_crpomy @ T_omy @ T_tool_omy
+    T_result = T_extra1 @ T_crpomy @ T_omy @ T_extra2 @ T_tool_omy
+
+
 
     # 从结果矩阵提取六个值 [x, y, z, roll, pitch, yaw]（角度为度）
-    x_new, y_new, z_new = T_result[0, 3], T_result[1, 3], T_result[2, 3]
+    # x_new, y_new, z_new = T_result[0, 3], T_result[1, 3], T_result[2, 3]
     rot_obj = R.from_matrix(T_result[:3, :3])
     roll_new, pitch_new, yaw_new = rot_obj.as_euler("xyz", degrees=True)
 
     # 位置姿态矩阵不同
-    return map_omy2crp([x, y, z, roll_new, pitch_new, yaw_new])
+    return map_omy2crp([x-60, y+105, z, roll_new, pitch_new, yaw_new])
+    # return map_omy2crp([x, y, z, -180, 0, 90])
 
 
 
