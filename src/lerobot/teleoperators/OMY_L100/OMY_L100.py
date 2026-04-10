@@ -19,7 +19,6 @@ import time
 
 from lerobot.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
 
-
 from ..teleoperator import Teleoperator
 from .config_OMY_L100 import OMYL100Config
 import threading

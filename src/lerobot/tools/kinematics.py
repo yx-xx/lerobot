@@ -330,7 +330,7 @@ def map_omy2crp(end_pose: list[float]) -> list[float]:
 
     return np.round([x_mapped, y_mapped, z_mapped, roll_deg, pitch_deg, yaw_deg], 10).tolist()
 
- 
+
 def get_omy_endpose2Crp(end_pose):
 
     required_keys = {"ee.x", "ee.y", "ee.z", "ee.roll", "ee.pitch", "ee.yaw"}
@@ -387,6 +387,13 @@ def get_omy_endpose2Crp(end_pose):
     # 位置姿态矩阵不同
     return map_omy2crp([x-60, y+105, z, roll_new, pitch_new, yaw_new])
     # return map_omy2crp([x, y, z, -180, 0, 90])
+
+
+
+
+
+
+
 
 
 
