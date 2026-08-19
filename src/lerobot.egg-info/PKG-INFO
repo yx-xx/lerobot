@@ -199,31 +199,29 @@ pip install scipy==1.15.3
 ├── src
 │   ├── lerobot
 │   └── lerobot.egg-info
-├── tests
-│   ├── artifacts
-│   ├── async_inference
-│   ├── cameras
-│   ├── configs
-│   ├── conftest.py
-│   ├── datasets
-│   ├── envs
-│   ├── fixtures
-│   ├── __init__.py
-│   ├── mocks
-│   ├── motors
-│   ├── optim
-│   ├── plugins
-│   ├── policies
-│   ├── processor
-│   ├── rl
-│   ├── robots
-│   ├── teleoperators
-│   ├── test_available.py
-│   ├── test_control_robot.py
-│   ├── transport
-│   ├── utils
-│   └── utils.py
-└── third_party
-    └── CrpRobotPy
+└── tests
+    ├── artifacts
+    ├── async_inference
+    ├── cameras
+    ├── configs
+    ├── conftest.py
+    ├── datasets
+    ├── envs
+    ├── fixtures
+    ├── __init__.py
+    ├── mocks
+    ├── motors
+    ├── optim
+    ├── plugins
+    ├── policies
+    ├── processor
+    ├── rl
+    ├── robots
+    ├── teleoperators
+    ├── test_available.py
+    ├── test_control_robot.py
+    ├── transport
+    ├── utils
+    └── utils.py
 ```
 

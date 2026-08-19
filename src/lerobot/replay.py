@@ -39,10 +39,6 @@ lerobot-replay \
 
 """
 
-from .tools import load_CrpRobotPy, get_endpose2Crp, Trajectory_process
-load_CrpRobotPy()
-
-
 import logging
 import time
 from dataclasses import asdict, dataclass
@@ -58,12 +54,12 @@ from lerobot.robots import (  # noqa: F401
     Robot,
     RobotConfig,
     bi_so100_follower,
+    franka,
     hope_jr,
     koch_follower,
     make_robot_from_config,
     so100_follower,
     so101_follower,
-    crp_arm, #添加CRP_Arm
 )
 from lerobot.utils.robot_utils import busy_wait
 from lerobot.utils.utils import (

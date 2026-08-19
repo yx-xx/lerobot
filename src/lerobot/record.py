@@ -58,10 +58,6 @@ lerobot-record \
 ```
 """
 
-from .tools import load_CrpRobotPy
-load_CrpRobotPy()
-
-
 import logging
 import time
 from dataclasses import asdict, dataclass, field
@@ -96,12 +92,12 @@ from lerobot.robots import (  # noqa: F401
     Robot,
     RobotConfig,
     bi_so100_follower,
+    franka,
     hope_jr,
     koch_follower,
     make_robot_from_config,
     so100_follower,
     so101_follower,
-    crp_arm, #添加CRP_Arm
 )
 from lerobot.teleoperators import (  # noqa: F401
     Teleoperator,
