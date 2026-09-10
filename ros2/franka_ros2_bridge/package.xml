@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>lerobot_franka_bridge</name>
+  <name>franka_ros2_bridge</name>
   <version>0.1.0</version>
-  <description>Minimal ROS 2 bridge for a Franka robot using frankx.</description>
-  <maintainer email="maintainer@example.com">LeRobot Maintainers</maintainer>
+  <description>Reusable ROS 2 bridge for Franka robots using frankx.</description>
+  <maintainer email="maintainer@example.com">Franka ROS 2 Bridge Maintainers</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_python</buildtool_depend>

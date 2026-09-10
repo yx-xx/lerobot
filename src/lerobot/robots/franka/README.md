@@ -1,8 +1,8 @@
 # Franka ROS 2 client
 
 `FrankaRobot` runs on the LeRobot computer. It does not connect to `libfranka`
-directly; the hardware computer must run the package in
-`ros2/lerobot_franka_bridge`.
+directly; the hardware computer must run the reusable package in
+`ros2/franka_ros2_bridge`.
 
 Both Ubuntu 22.04 computers must source ROS 2 Humble and use the same DDS domain:
 

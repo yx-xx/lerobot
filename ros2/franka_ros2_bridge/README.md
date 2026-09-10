@@ -1,7 +1,23 @@
-# lerobot_franka_bridge
+# franka_ros2_bridge
 
-面向 Ubuntu 22.04 / ROS 2 Humble 的简洁 `ament_python` Franka 桥接包。节点通过
-`frankx` 发布机器人状态，并在单一工作线程内串行执行最新的有效运动命令。
+面向 Ubuntu 22.04 / ROS 2 Humble 的通用 `ament_python` Franka 桥接包。
+任意 ROS 2 客户端（不限于 LeRobot）都可订阅/发布本包定义的话题。
+
+## 模块结构
+
+```text
+franka_ros2_bridge/
+  bridge_node.py   # ROS 节点接线（薄）
+  ros/             # 消息收发与转换
+  core/          # 公共类型、安全校验、命令队列
+  control/         # 机器人控制后端（当前为 frankx）
+```
+
+| 目录 | 职责 | 后续扩展时改哪里 |
+|------|------|------------------|
+| `ros/` | Topic 收发、ROS 消息 ↔ 内部类型 | 换消息格式 / Topic |
+| `core/` | 状态/命令结构、限位检查、最新命令队列 | 改安全策略 / 排队规则 |
+| `control/` | `read_state` / `move_joint` / `move_pose` | 加夹爪、阻抗、其它后端 |
 
 ## 接口
 
@@ -14,7 +30,7 @@
 `panda_joint1` 到 `panda_joint7` 排列，且目标位于配置的关节限位内。笛卡尔命令的
 `frame_id` 必须为空或等于 `base_frame`，并包含有限、非零四元数，且位置位于配置的
 workspace 内。回调只替换“最新命令”；工作线程串行执行，并丢弃超过
-`command_timeout_sec` 的命令。读取与运动共用硬件互斥锁。
+`command_timeout_sec` 的命令。读取与运动共用控制层硬件锁。
 
 ## 环境与构建
 
@@ -26,10 +42,10 @@ source /opt/ros/humble/setup.bash
 export ROS_DOMAIN_ID=23  # 同一 ROS 网络中的进程必须一致
 
 mkdir -p ~/franka_ws/src
-ln -s /home/pc108/project/lerobot/ros2/lerobot_franka_bridge \
-  ~/franka_ws/src/lerobot_franka_bridge
+# 将本目录放入工作空间，例如：
+# ln -s /path/to/franka_ros2_bridge ~/franka_ws/src/franka_ros2_bridge
 cd ~/franka_ws
-colcon build --symlink-install --packages-select lerobot_franka_bridge
+colcon build --symlink-install --packages-select franka_ros2_bridge
 source install/setup.bash
 ```
 
@@ -37,7 +53,7 @@ source install/setup.bash
 launch 参数传入：
 
 ```bash
-ros2 launch lerobot_franka_bridge franka_bridge.launch.py \
+ros2 launch franka_ros2_bridge franka_bridge.launch.py \
   config_file:=/absolute/path/to/franka_bridge.yaml
 ```
 
@@ -55,10 +71,10 @@ ros2 launch lerobot_franka_bridge franka_bridge.launch.py \
 
 ## 测试
 
-纯数学和关节校验函数不依赖 ROS 2，可直接测试：
+纯函数与队列逻辑不依赖 ROS 2 / frankx，可直接测试：
 
 ```bash
-cd /home/pc108/project/lerobot/ros2/lerobot_franka_bridge
-python3 -m pytest -q test/test_bridge_utils.py
-python3 -m py_compile lerobot_franka_bridge/*.py launch/*.py setup.py
+cd /path/to/franka_ros2_bridge
+PYTHONPATH=. python3 -m pytest -q test/test_bridge_utils.py
+python3 -m py_compile franka_ros2_bridge/*.py franka_ros2_bridge/*/*.py launch/*.py setup.py
 ```

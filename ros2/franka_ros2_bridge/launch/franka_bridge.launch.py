@@ -9,7 +9,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description() -> LaunchDescription:
     default_config = str(
-        Path(get_package_share_directory("lerobot_franka_bridge"))
+        Path(get_package_share_directory("franka_ros2_bridge"))
         / "config"
         / "franka_bridge.yaml"
     )
@@ -21,7 +21,7 @@ def generate_launch_description() -> LaunchDescription:
                 description="Path to the Franka bridge parameter YAML file",
             ),
             Node(
-                package="lerobot_franka_bridge",
+                package="franka_ros2_bridge",
                 executable="bridge_node",
                 name="franka_bridge",
                 output="screen",

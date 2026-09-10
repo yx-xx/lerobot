@@ -2,7 +2,7 @@ from glob import glob
 from setuptools import find_packages, setup
 
 
-package_name = "lerobot_franka_bridge"
+package_name = "franka_ros2_bridge"
 
 setup(
     name=package_name,
@@ -17,14 +17,14 @@ setup(
     ],
     install_requires=["setuptools"],
     zip_safe=True,
-    maintainer="LeRobot Maintainers",
+    maintainer="Franka ROS 2 Bridge Maintainers",
     maintainer_email="maintainer@example.com",
-    description="Minimal ROS 2 bridge for a Franka robot using frankx.",
+    description="Reusable ROS 2 bridge for Franka robots using frankx.",
     license="Apache-2.0",
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "bridge_node = lerobot_franka_bridge.bridge_node:main",
+            "bridge_node = franka_ros2_bridge.bridge_node:main",
         ],
     },
 )
