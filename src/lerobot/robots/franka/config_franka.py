@@ -28,10 +28,10 @@ from ..config import RobotConfig
 class FrankaConfig(RobotConfig):
     control_mode: Literal["joint", "cartesian"] = "joint"
     node_name: str = "lerobot_franka_client"
-    joint_state_topic: str = "/franka/joint_states"
-    ee_pose_topic: str = "/franka/ee_pose"
-    joint_command_topic: str = "/franka/joint_trajectory"
-    ee_command_topic: str = "/franka/ee_pose_command"
+    joint_state_topic: str = "/franka/joint_state"
+    end_pose_topic: str = "/franka/end_pose"
+    joint_cmd_topic: str = "/franka/joint_cmd"
+    end_pose_cmd_topic: str = "/franka/end_pose_cmd"
     connect_timeout_s: float = 5.0
     state_timeout_s: float = 1.0
     command_duration_s: float = 0.1
@@ -50,9 +50,9 @@ class FrankaConfig(RobotConfig):
         non_empty_strings = {
             "node_name": self.node_name,
             "joint_state_topic": self.joint_state_topic,
-            "ee_pose_topic": self.ee_pose_topic,
-            "joint_command_topic": self.joint_command_topic,
-            "ee_command_topic": self.ee_command_topic,
+            "end_pose_topic": self.end_pose_topic,
+            "joint_cmd_topic": self.joint_cmd_topic,
+            "end_pose_cmd_topic": self.end_pose_cmd_topic,
             "base_frame": self.base_frame,
         }
         for name, value in non_empty_strings.items():

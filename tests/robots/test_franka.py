@@ -191,7 +191,7 @@ def test_joint_action_is_clamped_and_published(tmp_path, ros_mocks):
     sent = robot.send_action(action)
 
     assert sent == {key: float(index) + 0.05 for index, key in enumerate(LEROBOT_JOINT_KEYS)}
-    publisher = nodes[0].publishers[robot.config.joint_command_topic][2]
+    publisher = nodes[0].publishers[robot.config.joint_cmd_topic][2]
     message = publisher.messages[-1]
     assert message.joint_names == list(FRANKA_JOINT_NAMES)
     assert message.points[0].positions == list(sent.values())
@@ -226,7 +226,7 @@ def test_cartesian_action_is_limited_and_published(tmp_path, ros_mocks):
         (0.0, 0.0, 0.0, 1.0),
         tuple(sent[key] for key in EE_KEYS[3:]),
     ) == pytest.approx(0.2)
-    publisher = nodes[0].publishers[robot.config.ee_command_topic][2]
+    publisher = nodes[0].publishers[robot.config.end_pose_cmd_topic][2]
     message = publisher.messages[-1]
     assert message.header.frame_id == robot.config.base_frame
     assert message.header.stamp == "stamp"

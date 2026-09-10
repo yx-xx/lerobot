@@ -127,15 +127,15 @@ class FrankaRobot(Robot):
             )
             self._node.create_subscription(
                 PoseStamped,
-                self.config.ee_pose_topic,
+                self.config.end_pose_topic,
                 self._ee_pose_callback,
                 self.config.qos_depth,
             )
             self._joint_publisher = self._node.create_publisher(
-                JointTrajectory, self.config.joint_command_topic, self.config.qos_depth
+                JointTrajectory, self.config.joint_cmd_topic, self.config.qos_depth
             )
             self._ee_publisher = self._node.create_publisher(
-                PoseStamped, self.config.ee_command_topic, self.config.qos_depth
+                PoseStamped, self.config.end_pose_cmd_topic, self.config.qos_depth
             )
             self._executor = SingleThreadedExecutor(context=self._context)
             self._executor.add_node(self._node)

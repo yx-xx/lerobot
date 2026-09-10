@@ -14,8 +14,8 @@ export ROS_DOMAIN_ID=23
 Check the bridge before starting LeRobot:
 
 ```bash
-ros2 topic hz /franka/joint_states
-ros2 topic echo --once /franka/ee_pose
+ros2 topic hz /franka/joint_state
+ros2 topic echo --once /franka/end_pose
 ```
 
 Joint control:

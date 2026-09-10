@@ -153,10 +153,10 @@ class FrankaBridgeNode(Node):
         super().__init__("franka_bridge")
 
         self.declare_parameter("robot_ip", "172.16.0.2")
-        self.declare_parameter("joint_state_topic", "/franka/joint_states")
-        self.declare_parameter("ee_pose_topic", "/franka/ee_pose")
-        self.declare_parameter("joint_command_topic", "/franka/joint_trajectory")
-        self.declare_parameter("ee_command_topic", "/franka/ee_pose_command")
+        self.declare_parameter("joint_state_topic", "/franka/joint_state")
+        self.declare_parameter("end_pose_topic", "/franka/end_pose")
+        self.declare_parameter("joint_cmd_topic", "/franka/joint_cmd")
+        self.declare_parameter("end_pose_cmd_topic", "/franka/end_pose_cmd")
         self.declare_parameter("base_frame", "panda_link0")
         self.declare_parameter("publish_rate_hz", 50.0)
         self.declare_parameter("velocity_rel", 0.15)
@@ -231,17 +231,17 @@ class FrankaBridgeNode(Node):
             JointStateMsg, str(self.get_parameter("joint_state_topic").value), 10
         )
         self._pose_pub = self.create_publisher(
-            PoseStamped, str(self.get_parameter("ee_pose_topic").value), 10
+            PoseStamped, str(self.get_parameter("end_pose_topic").value), 10
         )
         self.create_subscription(
             JointTrajectory,
-            str(self.get_parameter("joint_command_topic").value),
+            str(self.get_parameter("joint_cmd_topic").value),
             self._on_joint_command,
             10,
         )
         self.create_subscription(
             PoseStamped,
-            str(self.get_parameter("ee_command_topic").value),
+            str(self.get_parameter("end_pose_cmd_topic").value),
             self._on_pose_command,
             10,
         )

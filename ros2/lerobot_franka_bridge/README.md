@@ -5,10 +5,10 @@
 
 ## 接口
 
-- 发布 `/franka/joint_states` (`sensor_msgs/JointState`)
-- 发布 `/franka/ee_pose` (`geometry_msgs/PoseStamped`)
-- 订阅 `/franka/joint_trajectory` (`trajectory_msgs/JointTrajectory`)
-- 订阅 `/franka/ee_pose_command` (`geometry_msgs/PoseStamped`)
+- 发布 `/franka/joint_state` (`sensor_msgs/JointState`)
+- 发布 `/franka/end_pose` (`geometry_msgs/PoseStamped`)
+- 订阅 `/franka/joint_cmd` (`trajectory_msgs/JointTrajectory`)
+- 订阅 `/franka/end_pose_cmd` (`geometry_msgs/PoseStamped`)
 
 关节命令必须包含且仅包含一个轨迹点，关节名必须严格按
 `panda_joint1` 到 `panda_joint7` 排列，且目标位于配置的关节限位内。笛卡尔命令的

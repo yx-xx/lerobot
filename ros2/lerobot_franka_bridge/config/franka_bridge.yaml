@@ -1,10 +1,10 @@
 franka_bridge:
   ros__parameters:
     robot_ip: "172.16.0.2"
-    joint_state_topic: "/franka/joint_states"
-    ee_pose_topic: "/franka/ee_pose"
-    joint_command_topic: "/franka/joint_trajectory"
-    ee_command_topic: "/franka/ee_pose_command"
+    joint_state_topic: "/franka/joint_state"
+    end_pose_topic: "/franka/end_pose"
+    joint_cmd_topic: "/franka/joint_cmd"
+    end_pose_cmd_topic: "/franka/end_pose_cmd"
     base_frame: "panda_link0"
     publish_rate_hz: 50.0
     velocity_rel: 0.15
