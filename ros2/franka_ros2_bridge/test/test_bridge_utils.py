@@ -1,16 +1,25 @@
 import math
 import time
+from types import SimpleNamespace
 
 import pytest
 
 from franka_ros2_bridge.core.command_queue import CommandQueue
 from franka_ros2_bridge.core.math_utils import matrix_to_pose, pose_to_matrix
-from franka_ros2_bridge.core.safety import build_joint_command, build_pose_command
+from franka_ros2_bridge.core.safety import build_end_pose_command, build_joint_command
 from franka_ros2_bridge.core.types import (
     DEFAULT_JOINT_LOWER_LIMITS,
     DEFAULT_JOINT_UPPER_LIMITS,
     JOINT_NAMES,
+    EndPose,
     JointCommand,
+    RobotState,
+)
+from franka_ros2_bridge.ros.converters import (
+    end_pose_cmd_from_msg,
+    joint_cmd_from_msg,
+    to_end_pose_msg,
+    to_joint_state_msg,
 )
 
 
@@ -85,8 +94,8 @@ def test_build_joint_command_respects_limits() -> None:
         )
 
 
-def test_build_pose_command_checks_frame_and_workspace() -> None:
-    command = build_pose_command(
+def test_build_end_pose_command_checks_frame_and_workspace() -> None:
+    command = build_end_pose_command(
         (0.4, 0.0, 0.3),
         (0.0, 0.0, 0.0, 1.0),
         frame_id="panda_link0",
@@ -95,9 +104,10 @@ def test_build_pose_command_checks_frame_and_workspace() -> None:
         workspace_max=(0.8, 0.6, 0.9),
         received_at=1.0,
     )
-    assert len(command.matrix) == 16
+    assert command.position == pytest.approx((0.4, 0.0, 0.3))
+    assert command.quaternion == pytest.approx((0.0, 0.0, 0.0, 1.0))
     with pytest.raises(ValueError, match="frame_id"):
-        build_pose_command(
+        build_end_pose_command(
             (0.4, 0.0, 0.3),
             (0.0, 0.0, 0.0, 1.0),
             frame_id="other",
@@ -118,3 +128,28 @@ def test_command_queue_keeps_latest_and_detects_stale() -> None:
     assert command.joint is not None
     assert command.joint.positions[0] == pytest.approx(0.1)
     assert queue.is_stale(command)
+
+
+def test_joint_cmd_converters_round_trip() -> None:
+    state = RobotState(
+        joints=tuple(float(index) for index in range(7)),
+        end_pose=EndPose(position=(0.4, 0.0, 0.3), quaternion=(0.0, 0.0, 0.0, 1.0)),
+    )
+    joint_msg = SimpleNamespace(header=SimpleNamespace(stamp=None, frame_id=""), name=[], position=[])
+    to_joint_state_msg(joint_msg, state, stamp="stamp", frame_id="panda_link0")
+    names, positions = joint_cmd_from_msg(joint_msg)
+    assert names == list(JOINT_NAMES)
+    assert positions == list(state.joints)
+
+    pose_msg = SimpleNamespace(
+        header=SimpleNamespace(stamp=None, frame_id=""),
+        pose=SimpleNamespace(
+            position=SimpleNamespace(x=0.0, y=0.0, z=0.0),
+            orientation=SimpleNamespace(x=0.0, y=0.0, z=0.0, w=0.0),
+        ),
+    )
+    to_end_pose_msg(pose_msg, state, stamp="stamp", frame_id="panda_link0")
+    frame_id, position, quaternion = end_pose_cmd_from_msg(pose_msg)
+    assert frame_id == "panda_link0"
+    assert position == pytest.approx(state.end_pose.position)
+    assert quaternion == pytest.approx(state.end_pose.quaternion)

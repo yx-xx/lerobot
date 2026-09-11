@@ -36,10 +36,11 @@ class JointCommand:
 
 
 @dataclass(frozen=True)
-class PoseCommand:
-    """Cartesian command stored as a column-major 4x4 matrix."""
+class EndPoseCommand:
+    """Cartesian command: XYZ metres and XYZW quaternion."""
 
-    matrix: tuple[float, ...]
+    position: tuple[float, float, float]
+    quaternion: tuple[float, float, float, float]
     received_at: float
 
 
@@ -47,12 +48,12 @@ class PoseCommand:
 class MotionCommand:
     mode: ControlMode
     joint: JointCommand | None = None
-    pose: PoseCommand | None = None
+    end_pose: EndPoseCommand | None = None
 
     @property
     def received_at(self) -> float:
         if self.mode == "joint":
             assert self.joint is not None
             return self.joint.received_at
-        assert self.pose is not None
-        return self.pose.received_at
+        assert self.end_pose is not None
+        return self.end_pose.received_at

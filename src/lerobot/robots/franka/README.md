@@ -37,10 +37,11 @@ lerobot-record \
 ```
 
 Observations always contain `j1.pos` through `j7.pos` and
-`ee.x/ee.y/ee.z/ee.qx/ee.qy/ee.qz/ee.qw`. `send_action()` follows
+`end_pose.x/y/z/qx/qy/qz/qw`. `send_action()` follows
 `control_mode`; application code may call `send_joint_action()` or
-`send_ee_pose()` explicitly. State and command topic names, timeouts, command
-duration, base frame, QoS depth, and per-step safety limits are configurable.
+`send_end_pose()` explicitly. Joint commands use `sensor_msgs/JointState`;
+end-pose commands use `geometry_msgs/PoseStamped`. Topic names, timeouts,
+base frame, QoS depth, and per-step safety limits are configurable.
 
 The bridge uses latest-target point-to-point motion, not a hard real-time
 streaming controller. Keep Franka Desk collision protection and emergency stop

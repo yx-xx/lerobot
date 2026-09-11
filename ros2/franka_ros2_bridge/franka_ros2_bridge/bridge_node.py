@@ -7,7 +7,7 @@ import time
 from typing import Any, Sequence
 
 from franka_ros2_bridge.core.command_queue import CommandQueue
-from franka_ros2_bridge.core.safety import build_joint_command, build_pose_command
+from franka_ros2_bridge.core.safety import build_end_pose_command, build_joint_command
 from franka_ros2_bridge.core.types import (
     DEFAULT_JOINT_LOWER_LIMITS,
     DEFAULT_JOINT_UPPER_LIMITS,
@@ -15,10 +15,10 @@ from franka_ros2_bridge.core.types import (
 )
 from franka_ros2_bridge.control.frankx_controller import FrankxController
 from franka_ros2_bridge.ros.converters import (
-    fill_joint_state_msg,
-    fill_pose_stamped_msg,
-    joint_trajectory_fields,
-    pose_stamped_fields,
+    end_pose_cmd_from_msg,
+    joint_cmd_from_msg,
+    to_end_pose_msg,
+    to_joint_state_msg,
 )
 
 # Re-export pure helpers so existing imports from bridge_node keep working.
@@ -30,12 +30,11 @@ try:
     from geometry_msgs.msg import PoseStamped
     from rclpy.node import Node
     from sensor_msgs.msg import JointState as JointStateMsg
-    from trajectory_msgs.msg import JointTrajectory
 
     _ROS_IMPORT_ERROR: Exception | None = None
 except ImportError as exc:
     rclpy = None  # type: ignore[assignment]
-    PoseStamped = JointStateMsg = JointTrajectory = Any  # type: ignore[misc,assignment]
+    PoseStamped = JointStateMsg = Any  # type: ignore[misc,assignment]
     Node = object  # type: ignore[assignment,misc]
     _ROS_IMPORT_ERROR = exc
 
@@ -57,6 +56,7 @@ class FrankaBridgeNode(Node):
         self.declare_parameter("publish_rate_hz", 50.0)
         self.declare_parameter("velocity_rel", 0.15)
         self.declare_parameter("acceleration_rel", 0.1)
+        self.declare_parameter("jerk_rel", 0.1)
         self.declare_parameter("command_timeout_sec", 0.5)
         self.declare_parameter("joint_lower_limits", list(DEFAULT_JOINT_LOWER_LIMITS))
         self.declare_parameter("joint_upper_limits", list(DEFAULT_JOINT_UPPER_LIMITS))
@@ -76,6 +76,7 @@ class FrankaBridgeNode(Node):
         rate = float(self.get_parameter("publish_rate_hz").value)
         velocity_rel = float(self.get_parameter("velocity_rel").value)
         acceleration_rel = float(self.get_parameter("acceleration_rel").value)
+        jerk_rel = float(self.get_parameter("jerk_rel").value)
 
         if rate <= 0.0 or self.command_timeout <= 0.0:
             raise ValueError("publish_rate_hz and command_timeout_sec must be positive")
@@ -104,27 +105,28 @@ class FrankaBridgeNode(Node):
             str(self.get_parameter("robot_ip").value),
             velocity_rel=velocity_rel,
             acceleration_rel=acceleration_rel,
+            jerk_rel=jerk_rel,
         )
         self._controller.connect()
         self._commands = CommandQueue(self.command_timeout)
         self._stop_event = threading.Event()
 
-        self._joint_pub = self.create_publisher(
+        self._joint_state_pub = self.create_publisher(
             JointStateMsg, str(self.get_parameter("joint_state_topic").value), 10
         )
-        self._pose_pub = self.create_publisher(
+        self._end_pose_pub = self.create_publisher(
             PoseStamped, str(self.get_parameter("end_pose_topic").value), 10
         )
         self.create_subscription(
-            JointTrajectory,
+            JointStateMsg,
             str(self.get_parameter("joint_cmd_topic").value),
-            self._on_joint_command,
+            self._on_joint_cmd,
             10,
         )
         self.create_subscription(
             PoseStamped,
             str(self.get_parameter("end_pose_cmd_topic").value),
-            self._on_pose_command,
+            self._on_end_pose_cmd,
             10,
         )
         self.create_timer(1.0 / rate, self._publish_state)
@@ -133,9 +135,9 @@ class FrankaBridgeNode(Node):
         )
         self._worker.start()
 
-    def _on_joint_command(self, message: JointTrajectory) -> None:
+    def _on_joint_cmd(self, message: JointStateMsg) -> None:
         try:
-            names, positions = joint_trajectory_fields(message)
+            names, positions = joint_cmd_from_msg(message)
             command = build_joint_command(
                 names,
                 positions,
@@ -144,14 +146,14 @@ class FrankaBridgeNode(Node):
                 received_at=time.monotonic(),
             )
         except (TypeError, ValueError) as exc:
-            self.get_logger().warning(f"Rejected joint command: {exc}")
+            self.get_logger().warning(f"Rejected joint_cmd: {exc}")
             return
         self._commands.push_joint(command)
 
-    def _on_pose_command(self, message: PoseStamped) -> None:
+    def _on_end_pose_cmd(self, message: PoseStamped) -> None:
         try:
-            frame_id, position, quaternion = pose_stamped_fields(message)
-            command = build_pose_command(
+            frame_id, position, quaternion = end_pose_cmd_from_msg(message)
+            command = build_end_pose_command(
                 position,
                 quaternion,
                 frame_id=frame_id,
@@ -161,9 +163,9 @@ class FrankaBridgeNode(Node):
                 received_at=time.monotonic(),
             )
         except (TypeError, ValueError) as exc:
-            self.get_logger().warning(f"Rejected Cartesian command: {exc}")
+            self.get_logger().warning(f"Rejected end_pose_cmd: {exc}")
             return
-        self._commands.push_pose(command)
+        self._commands.push_end_pose(command)
 
     def _command_worker(self) -> None:
         while not self._stop_event.is_set():
@@ -178,8 +180,8 @@ class FrankaBridgeNode(Node):
                     assert command.joint is not None
                     self._controller.move_joint(command.joint)
                 else:
-                    assert command.pose is not None
-                    self._controller.move_pose(command.pose)
+                    assert command.end_pose is not None
+                    self._controller.move_end_pose(command.end_pose)
             except Exception as exc:
                 self.get_logger().error(f"Motion failed: {exc}")
 
@@ -191,23 +193,23 @@ class FrankaBridgeNode(Node):
             return
 
         stamp = self.get_clock().now().to_msg()
-        joint_message = fill_joint_state_msg(
+        joint_message = to_joint_state_msg(
             JointStateMsg(), state, stamp=stamp, frame_id=self.base_frame
         )
-        pose_message = fill_pose_stamped_msg(
+        end_pose_message = to_end_pose_msg(
             PoseStamped(), state, stamp=stamp, frame_id=self.base_frame
         )
-        self._joint_pub.publish(joint_message)
-        self._pose_pub.publish(pose_message)
+        self._joint_state_pub.publish(joint_message)
+        self._end_pose_pub.publish(end_pose_message)
 
     def destroy_node(self) -> bool:
         self._stop_event.set()
         self._commands.wake()
-        self._worker.join(timeout=2.0)
         try:
             self._controller.disconnect()
         except Exception:
             self.get_logger().exception("Failed to disconnect Franka controller")
+        self._worker.join(timeout=2.0)
         return super().destroy_node()
 
 

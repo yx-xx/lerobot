@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import time
 
-from franka_ros2_bridge.core.types import JointCommand, MotionCommand, PoseCommand
+from franka_ros2_bridge.core.types import EndPoseCommand, JointCommand, MotionCommand
 
 
 class CommandQueue:
@@ -22,8 +22,8 @@ class CommandQueue:
     def push_joint(self, command: JointCommand) -> None:
         self._push(MotionCommand(mode="joint", joint=command))
 
-    def push_pose(self, command: PoseCommand) -> None:
-        self._push(MotionCommand(mode="cartesian", pose=command))
+    def push_end_pose(self, command: EndPoseCommand) -> None:
+        self._push(MotionCommand(mode="cartesian", end_pose=command))
 
     def _push(self, command: MotionCommand) -> None:
         with self._lock:

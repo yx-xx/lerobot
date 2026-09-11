@@ -27,14 +27,13 @@ from ..config import RobotConfig
 @dataclass
 class FrankaConfig(RobotConfig):
     control_mode: Literal["joint", "cartesian"] = "joint"
-    node_name: str = "lerobot_franka_client"
+    node_name: str = "franka_client"
     joint_state_topic: str = "/franka/joint_state"
     end_pose_topic: str = "/franka/end_pose"
     joint_cmd_topic: str = "/franka/joint_cmd"
     end_pose_cmd_topic: str = "/franka/end_pose_cmd"
     connect_timeout_s: float = 5.0
     state_timeout_s: float = 1.0
-    command_duration_s: float = 0.1
     qos_depth: int = 10
     base_frame: str = "panda_link0"
     max_relative_target: float | dict[str, float] | None = 0.05
@@ -62,7 +61,6 @@ class FrankaConfig(RobotConfig):
         positive_values = {
             "connect_timeout_s": self.connect_timeout_s,
             "state_timeout_s": self.state_timeout_s,
-            "command_duration_s": self.command_duration_s,
             "max_relative_translation": self.max_relative_translation,
             "max_relative_rotation": self.max_relative_rotation,
         }

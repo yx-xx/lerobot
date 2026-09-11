@@ -33,26 +33,21 @@ logger = logging.getLogger(__name__)
 try:
     import rclpy
     from geometry_msgs.msg import PoseStamped
-    from rclpy.duration import Duration
     from rclpy.executors import SingleThreadedExecutor
     from sensor_msgs.msg import JointState
-    from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
     _ROS_IMPORT_ERROR: ImportError | None = None
 except ImportError as error:
     rclpy = None
     PoseStamped = None
-    Duration = None
     SingleThreadedExecutor = None
     JointState = None
-    JointTrajectory = None
-    JointTrajectoryPoint = None
     _ROS_IMPORT_ERROR = error
 
 
-FRANKA_JOINT_NAMES = tuple(f"panda_joint{i}" for i in range(1, 8))
-LEROBOT_JOINT_KEYS = tuple(f"j{i}.pos" for i in range(1, 8))
-EE_KEYS = ("ee.x", "ee.y", "ee.z", "ee.qx", "ee.qy", "ee.qz", "ee.qw")
+JOINT_NAMES = tuple(f"panda_joint{i}" for i in range(1, 8))
+JOINT_KEYS = tuple(f"j{i}.pos" for i in range(1, 8))
+END_POSE_KEYS = ("end_pose.x", "end_pose.y", "end_pose.z", "end_pose.qx", "end_pose.qy", "end_pose.qz", "end_pose.qw")
 
 
 class FrankaRobot(Robot):
@@ -68,24 +63,24 @@ class FrankaRobot(Robot):
         self._connected = False
         self._lock = threading.Lock()
         self._joint_positions: dict[str, float] | None = None
-        self._ee_pose: tuple[float, ...] | None = None
+        self._end_pose: tuple[float, ...] | None = None
         self._joint_state_time: float | None = None
-        self._ee_pose_time: float | None = None
+        self._end_pose_time: float | None = None
         self._context = None
         self._node = None
         self._executor = None
         self._executor_thread: threading.Thread | None = None
         self._joint_publisher = None
-        self._ee_publisher = None
+        self._end_pose_publisher = None
         self.cameras = make_cameras_from_configs(config.cameras)
 
     @property
     def _motors_ft(self) -> dict[str, type]:
-        return dict.fromkeys(LEROBOT_JOINT_KEYS, float)
+        return dict.fromkeys(JOINT_KEYS, float)
 
     @property
-    def _ee_ft(self) -> dict[str, type]:
-        return dict.fromkeys(EE_KEYS, float)
+    def _end_pose_ft(self) -> dict[str, type]:
+        return dict.fromkeys(END_POSE_KEYS, float)
 
     @property
     def _cameras_ft(self) -> dict[str, tuple]:
@@ -96,11 +91,11 @@ class FrankaRobot(Robot):
 
     @cached_property
     def observation_features(self) -> dict[str, type | tuple]:
-        return {**self._motors_ft, **self._ee_ft, **self._cameras_ft}
+        return {**self._motors_ft, **self._end_pose_ft, **self._cameras_ft}
 
     @cached_property
     def action_features(self) -> dict[str, type]:
-        return self._motors_ft if self.config.control_mode == "joint" else self._ee_ft
+        return self._motors_ft if self.config.control_mode == "joint" else self._end_pose_ft
 
     @property
     def is_connected(self) -> bool:
@@ -112,7 +107,7 @@ class FrankaRobot(Robot):
         if rclpy is None:
             raise RuntimeError(
                 "ROS 2 Python packages are unavailable. Install/source rclpy, sensor_msgs, "
-                "trajectory_msgs, and geometry_msgs before connecting."
+                "and geometry_msgs before connecting."
             ) from _ROS_IMPORT_ERROR
 
         try:
@@ -128,13 +123,13 @@ class FrankaRobot(Robot):
             self._node.create_subscription(
                 PoseStamped,
                 self.config.end_pose_topic,
-                self._ee_pose_callback,
+                self._end_pose_callback,
                 self.config.qos_depth,
             )
             self._joint_publisher = self._node.create_publisher(
-                JointTrajectory, self.config.joint_cmd_topic, self.config.qos_depth
+                JointState, self.config.joint_cmd_topic, self.config.qos_depth
             )
-            self._ee_publisher = self._node.create_publisher(
+            self._end_pose_publisher = self._node.create_publisher(
                 PoseStamped, self.config.end_pose_cmd_topic, self.config.qos_depth
             )
             self._executor = SingleThreadedExecutor(context=self._context)
@@ -172,21 +167,21 @@ class FrankaRobot(Robot):
             now = time.monotonic()
             if (
                 self._joint_positions is None
-                or self._ee_pose is None
+                or self._end_pose is None
                 or self._joint_state_time is None
-                or self._ee_pose_time is None
+                or self._end_pose_time is None
             ):
                 raise RuntimeError("Franka state is incomplete.")
             if now - self._joint_state_time > self.config.state_timeout_s:
                 raise RuntimeError("Franka joint state is stale.")
-            if now - self._ee_pose_time > self.config.state_timeout_s:
+            if now - self._end_pose_time > self.config.state_timeout_s:
                 raise RuntimeError("Franka end-effector pose is stale.")
             observation = {
                 **{
                     key: self._joint_positions[name]
-                    for key, name in zip(LEROBOT_JOINT_KEYS, FRANKA_JOINT_NAMES, strict=True)
+                    for key, name in zip(JOINT_KEYS, JOINT_NAMES, strict=True)
                 },
-                **dict(zip(EE_KEYS, self._ee_pose, strict=True)),
+                **dict(zip(END_POSE_KEYS, self._end_pose, strict=True)),
             }
 
         for camera_key, camera in self.cameras.items():
@@ -196,7 +191,7 @@ class FrankaRobot(Robot):
     def send_action(self, action: dict[str, float]) -> dict[str, float]:
         if self.config.control_mode == "joint":
             return self.send_joint_action(action)
-        return self.send_ee_pose(action)
+        return self.send_end_pose(action)
 
     def disconnect(self) -> None:
         if not self._connected:
@@ -205,7 +200,7 @@ class FrankaRobot(Robot):
 
     def send_joint_action(self, action: dict[str, float]) -> dict[str, float]:
         self._require_connected()
-        values = self._validate_action(action, LEROBOT_JOINT_KEYS)
+        values = self._validate_action(action, JOINT_KEYS)
         with self._lock:
             if self._joint_positions is None or self._joint_state_time is None:
                 raise RuntimeError("Franka joint state is unavailable.")
@@ -213,7 +208,7 @@ class FrankaRobot(Robot):
                 raise RuntimeError("Franka joint state is stale.")
             present = {
                 f"j{i}": self._joint_positions[name]
-                for i, name in enumerate(FRANKA_JOINT_NAMES, start=1)
+                for i, name in enumerate(JOINT_NAMES, start=1)
             }
 
         goals = {key.removesuffix(".pos"): value for key, value in values.items()}
@@ -223,32 +218,31 @@ class FrankaRobot(Robot):
                 self.config.max_relative_target,
             )
 
-        message = JointTrajectory()
-        message.joint_names = list(FRANKA_JOINT_NAMES)
-        point = JointTrajectoryPoint()
-        point.positions = [goals[f"j{i}"] for i in range(1, 8)]
-        point.time_from_start = self._duration_message(self.config.command_duration_s)
-        message.points = [point]
+        message = JointState()
+        message.header.stamp = self._node.get_clock().now().to_msg()
+        message.header.frame_id = self.config.base_frame
+        message.name = list(JOINT_NAMES)
+        message.position = [goals[f"j{i}"] for i in range(1, 8)]
         self._joint_publisher.publish(message)
-        return {f"j{i}.pos": point.positions[i - 1] for i in range(1, 8)}
+        return {f"j{i}.pos": message.position[i - 1] for i in range(1, 8)}
 
-    def send_ee_pose(self, action: dict[str, float]) -> dict[str, float]:
+    def send_end_pose(self, action: dict[str, float]) -> dict[str, float]:
         self._require_connected()
-        values = self._validate_action(action, EE_KEYS)
-        target_position = tuple(values[key] for key in EE_KEYS[:3])
-        target_quaternion = tuple(values[key] for key in EE_KEYS[3:])
+        values = self._validate_action(action, END_POSE_KEYS)
+        target_position = tuple(values[key] for key in END_POSE_KEYS[:3])
+        target_quaternion = tuple(values[key] for key in END_POSE_KEYS[3:])
         norm = math.sqrt(sum(value * value for value in target_quaternion))
         if not math.isclose(norm, 1.0, rel_tol=1e-5, abs_tol=1e-5):
             raise ValueError("End-effector quaternion must be normalized.")
         target_quaternion = tuple(value / norm for value in target_quaternion)
 
         with self._lock:
-            if self._ee_pose is None or self._ee_pose_time is None:
+            if self._end_pose is None or self._end_pose_time is None:
                 raise RuntimeError("Franka end-effector pose is unavailable.")
-            if time.monotonic() - self._ee_pose_time > self.config.state_timeout_s:
+            if time.monotonic() - self._end_pose_time > self.config.state_timeout_s:
                 raise RuntimeError("Franka end-effector pose is stale.")
-            current_position = self._ee_pose[:3]
-            current_quaternion = self._normalize_quaternion(self._ee_pose[3:])
+            current_position = self._end_pose[:3]
+            current_quaternion = self._normalize_quaternion(self._end_pose[3:])
 
         delta = tuple(target - current for target, current in zip(target_position, current_position, strict=True))
         distance = math.sqrt(sum(value * value for value in delta))
@@ -274,21 +268,21 @@ class FrankaRobot(Robot):
             message.pose.orientation.z,
             message.pose.orientation.w,
         ) = target_quaternion
-        self._ee_publisher.publish(message)
+        self._end_pose_publisher.publish(message)
         sent = (*target_position, *target_quaternion)
-        return dict(zip(EE_KEYS, sent, strict=True))
+        return dict(zip(END_POSE_KEYS, sent, strict=True))
 
     def _joint_state_callback(self, message: Any) -> None:
         if len(message.name) != len(message.position):
             return
         positions = dict(zip(message.name, message.position, strict=True))
-        if not all(name in positions and math.isfinite(positions[name]) for name in FRANKA_JOINT_NAMES):
+        if not all(name in positions and math.isfinite(positions[name]) for name in JOINT_NAMES):
             return
         with self._lock:
-            self._joint_positions = {name: float(positions[name]) for name in FRANKA_JOINT_NAMES}
+            self._joint_positions = {name: float(positions[name]) for name in JOINT_NAMES}
             self._joint_state_time = time.monotonic()
 
-    def _ee_pose_callback(self, message: Any) -> None:
+    def _end_pose_callback(self, message: Any) -> None:
         if message.header.frame_id and message.header.frame_id != self.config.base_frame:
             logger.warning(
                 "Ignoring Franka pose in frame %s; expected %s.",
@@ -313,14 +307,14 @@ class FrankaRobot(Robot):
         except ValueError:
             return
         with self._lock:
-            self._ee_pose = (*map(float, values[:3]), *quaternion)
-            self._ee_pose_time = time.monotonic()
+            self._end_pose = (*map(float, values[:3]), *quaternion)
+            self._end_pose_time = time.monotonic()
 
     def _wait_for_initial_state(self) -> None:
         deadline = time.monotonic() + self.config.connect_timeout_s
         while time.monotonic() < deadline:
             with self._lock:
-                if self._joint_positions is not None and self._ee_pose is not None:
+                if self._joint_positions is not None and self._end_pose is not None:
                     return
             time.sleep(0.01)
         raise RuntimeError(
@@ -357,12 +351,12 @@ class FrankaRobot(Robot):
         self._node = None
         self._context = None
         self._joint_publisher = None
-        self._ee_publisher = None
+        self._end_pose_publisher = None
         with self._lock:
             self._joint_positions = None
-            self._ee_pose = None
+            self._end_pose = None
             self._joint_state_time = None
-            self._ee_pose_time = None
+            self._end_pose_time = None
 
     def _require_connected(self) -> None:
         if not self.is_connected:
@@ -380,10 +374,6 @@ class FrankaRobot(Robot):
         ):
             raise ValueError("Action values must be finite numbers.")
         return {key: float(action[key]) for key in expected_keys}
-
-    def _duration_message(self, duration_s: float) -> Any:
-        duration = Duration(seconds=duration_s)
-        return duration.to_msg()
 
     @staticmethod
     def _normalize_quaternion(quaternion: tuple[float, ...]) -> tuple[float, ...]:

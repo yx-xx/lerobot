@@ -16,12 +16,13 @@ import pytest
 
 from lerobot.robots.franka import FrankaConfig, FrankaRobot
 from lerobot.robots.franka import franka as franka_module
-from lerobot.robots.franka.franka import EE_KEYS, FRANKA_JOINT_NAMES, LEROBOT_JOINT_KEYS
+from lerobot.robots.franka.franka import END_POSE_KEYS, JOINT_NAMES, JOINT_KEYS
 
 
 class _JointState:
     def __init__(self):
-        self.name = list(FRANKA_JOINT_NAMES)
+        self.header = SimpleNamespace(frame_id="", stamp=None)
+        self.name = list(JOINT_NAMES)
         self.position = [float(index) for index in range(7)]
 
 
@@ -32,18 +33,6 @@ class _PoseStamped:
             position=SimpleNamespace(x=0.4, y=0.0, z=0.3),
             orientation=SimpleNamespace(x=0.0, y=0.0, z=0.0, w=1.0),
         )
-
-
-class _JointTrajectory:
-    def __init__(self):
-        self.joint_names = []
-        self.points = []
-
-
-class _JointTrajectoryPoint:
-    def __init__(self):
-        self.positions = []
-        self.time_from_start = None
 
 
 class _Context:
@@ -104,14 +93,6 @@ class _Executor:
         self.context.stop.set()
 
 
-class _Duration:
-    def __init__(self, seconds):
-        self.seconds = seconds
-
-    def to_msg(self):
-        return self.seconds
-
-
 @pytest.fixture
 def ros_mocks():
     nodes = []
@@ -123,7 +104,6 @@ def ros_mocks():
 
     fake_rclpy = SimpleNamespace(
         context=SimpleNamespace(Context=_Context),
-        duration=SimpleNamespace(Duration=_Duration),
         init=MagicMock(),
         create_node=create_node,
     )
@@ -131,9 +111,6 @@ def ros_mocks():
         patch.object(franka_module, "rclpy", fake_rclpy),
         patch.object(franka_module, "JointState", _JointState),
         patch.object(franka_module, "PoseStamped", _PoseStamped),
-        patch.object(franka_module, "JointTrajectory", _JointTrajectory),
-        patch.object(franka_module, "JointTrajectoryPoint", _JointTrajectoryPoint),
-        patch.object(franka_module, "Duration", _Duration),
         patch.object(franka_module, "SingleThreadedExecutor", _Executor),
     ):
         yield fake_rclpy, nodes
@@ -167,10 +144,10 @@ def test_connect_observe_and_disconnect(tmp_path, ros_mocks):
     robot.connect()
 
     assert robot.is_connected
-    assert set(robot.observation_features) == {*LEROBOT_JOINT_KEYS, *EE_KEYS}
+    assert set(robot.observation_features) == {*JOINT_KEYS, *END_POSE_KEYS}
     observation = robot.get_observation()
-    assert [observation[key] for key in LEROBOT_JOINT_KEYS] == [float(index) for index in range(7)]
-    assert [observation[key] for key in EE_KEYS] == [0.4, 0.0, 0.3, 0.0, 0.0, 0.0, 1.0]
+    assert [observation[key] for key in JOINT_KEYS] == [float(index) for index in range(7)]
+    assert [observation[key] for key in END_POSE_KEYS] == [0.4, 0.0, 0.3, 0.0, 0.0, 0.0, 1.0]
 
     context = robot._context
     executor = robot._executor
@@ -184,18 +161,19 @@ def test_connect_observe_and_disconnect(tmp_path, ros_mocks):
 
 def test_joint_action_is_clamped_and_published(tmp_path, ros_mocks):
     _, nodes = ros_mocks
-    robot = _make_robot(tmp_path, max_relative_target=0.05, command_duration_s=0.2)
+    robot = _make_robot(tmp_path, max_relative_target=0.05)
     robot.connect()
-    action = {key: float(index + 1) for index, key in enumerate(LEROBOT_JOINT_KEYS)}
+    action = {key: float(index + 1) for index, key in enumerate(JOINT_KEYS)}
 
     sent = robot.send_action(action)
 
-    assert sent == {key: float(index) + 0.05 for index, key in enumerate(LEROBOT_JOINT_KEYS)}
+    assert sent == {key: float(index) + 0.05 for index, key in enumerate(JOINT_KEYS)}
     publisher = nodes[0].publishers[robot.config.joint_cmd_topic][2]
     message = publisher.messages[-1]
-    assert message.joint_names == list(FRANKA_JOINT_NAMES)
-    assert message.points[0].positions == list(sent.values())
-    assert message.points[0].time_from_start == 0.2
+    assert message.name == list(JOINT_NAMES)
+    assert message.position == list(sent.values())
+    assert message.header.frame_id == robot.config.base_frame
+    assert message.header.stamp == "stamp"
     robot.disconnect()
 
 
@@ -208,23 +186,23 @@ def test_cartesian_action_is_limited_and_published(tmp_path, ros_mocks):
         max_relative_rotation=0.2,
     )
     robot.connect()
-    assert set(robot.action_features) == set(EE_KEYS)
+    assert set(robot.action_features) == set(END_POSE_KEYS)
 
     action = {
-        "ee.x": 0.7,
-        "ee.y": 0.0,
-        "ee.z": 0.3,
-        "ee.qx": 0.0,
-        "ee.qy": 0.0,
-        "ee.qz": 1.0,
-        "ee.qw": 0.0,
+        "end_pose.x": 0.7,
+        "end_pose.y": 0.0,
+        "end_pose.z": 0.3,
+        "end_pose.qx": 0.0,
+        "end_pose.qy": 0.0,
+        "end_pose.qz": 1.0,
+        "end_pose.qw": 0.0,
     }
     sent = robot.send_action(action)
 
-    assert sent["ee.x"] == pytest.approx(0.5)
+    assert sent["end_pose.x"] == pytest.approx(0.5)
     assert FrankaRobot._quaternion_angle(
         (0.0, 0.0, 0.0, 1.0),
-        tuple(sent[key] for key in EE_KEYS[3:]),
+        tuple(sent[key] for key in END_POSE_KEYS[3:]),
     ) == pytest.approx(0.2)
     publisher = nodes[0].publishers[robot.config.end_pose_cmd_topic][2]
     message = publisher.messages[-1]
@@ -237,12 +215,12 @@ def test_action_validation(tmp_path, ros_mocks):
     robot = _make_robot(tmp_path, control_mode="cartesian")
     robot.connect()
     with pytest.raises(ValueError, match="exactly"):
-        robot.send_action({"ee.x": 0.0})
-    invalid = dict.fromkeys(EE_KEYS, 0.0)
-    invalid["ee.qw"] = 2.0
+        robot.send_action({"end_pose.x": 0.0})
+    invalid = dict.fromkeys(END_POSE_KEYS, 0.0)
+    invalid["end_pose.qw"] = 2.0
     with pytest.raises(ValueError, match="normalized"):
         robot.send_action(invalid)
-    invalid["ee.qw"] = float("nan")
+    invalid["end_pose.qw"] = float("nan")
     with pytest.raises(ValueError, match="finite"):
         robot.send_action(invalid)
     robot.disconnect()

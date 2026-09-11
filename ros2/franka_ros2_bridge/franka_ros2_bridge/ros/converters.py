@@ -7,13 +7,17 @@ from typing import Any
 from franka_ros2_bridge.core.types import JOINT_NAMES, RobotState
 
 
-def joint_trajectory_fields(message: Any) -> tuple[list[str], list[float]]:
-    if len(message.points) != 1:
-        raise ValueError("trajectory must contain exactly one point")
-    return list(message.joint_names), list(message.points[0].positions)
+def joint_cmd_from_msg(message: Any) -> tuple[list[str], list[float]]:
+    names = list(message.name)
+    positions = [float(value) for value in message.position]
+    if len(names) != len(positions):
+        raise ValueError("joint_cmd name and position must have the same length")
+    return names, positions
 
 
-def pose_stamped_fields(message: Any) -> tuple[str, tuple[float, float, float], tuple[float, float, float, float]]:
+def end_pose_cmd_from_msg(
+    message: Any,
+) -> tuple[str, tuple[float, float, float], tuple[float, float, float, float]]:
     position = (
         float(message.pose.position.x),
         float(message.pose.position.y),
@@ -28,7 +32,7 @@ def pose_stamped_fields(message: Any) -> tuple[str, tuple[float, float, float], 
     return str(message.header.frame_id), position, quaternion
 
 
-def fill_joint_state_msg(message: Any, state: RobotState, *, stamp: Any, frame_id: str) -> Any:
+def to_joint_state_msg(message: Any, state: RobotState, *, stamp: Any, frame_id: str) -> Any:
     message.header.stamp = stamp
     message.header.frame_id = frame_id
     message.name = list(JOINT_NAMES)
@@ -36,7 +40,7 @@ def fill_joint_state_msg(message: Any, state: RobotState, *, stamp: Any, frame_i
     return message
 
 
-def fill_pose_stamped_msg(message: Any, state: RobotState, *, stamp: Any, frame_id: str) -> Any:
+def to_end_pose_msg(message: Any, state: RobotState, *, stamp: Any, frame_id: str) -> Any:
     message.header.stamp = stamp
     message.header.frame_id = frame_id
     message.pose.position.x, message.pose.position.y, message.pose.position.z = state.end_pose.position

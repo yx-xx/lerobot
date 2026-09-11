@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from franka_ros2_bridge.core.types import JointCommand, PoseCommand, RobotState
+from franka_ros2_bridge.core.types import EndPoseCommand, JointCommand, RobotState
 
 
 class RobotController(Protocol):
@@ -18,4 +18,4 @@ class RobotController(Protocol):
 
     def move_joint(self, command: JointCommand) -> None: ...
 
-    def move_pose(self, command: PoseCommand) -> None: ...
+    def move_end_pose(self, command: EndPoseCommand) -> None: ...

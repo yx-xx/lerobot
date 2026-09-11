@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import math
 from typing import Sequence
 
 from franka_ros2_bridge.core.math_utils import finite, matrix_to_pose, pose_to_matrix
-from franka_ros2_bridge.core.types import JOINT_NAMES, EndPose, JointCommand, PoseCommand
+from franka_ros2_bridge.core.types import JOINT_NAMES, EndPose, EndPoseCommand, JointCommand
 
 
 def validate_joint_positions(
@@ -65,7 +66,7 @@ def build_joint_command(
     return JointCommand(positions=validated, received_at=received_at)
 
 
-def build_pose_command(
+def build_end_pose_command(
     position: Sequence[float],
     quaternion: Sequence[float],
     *,
@@ -74,12 +75,16 @@ def build_pose_command(
     workspace_min: Sequence[float],
     workspace_max: Sequence[float],
     received_at: float,
-) -> PoseCommand:
+) -> EndPoseCommand:
     if frame_id and frame_id != base_frame:
         raise ValueError(f"frame_id must be empty or equal to {base_frame!r}")
-    matrix = pose_to_matrix(position, quaternion)
-    ensure_workspace(position, workspace_min, workspace_max)
-    return PoseCommand(matrix=matrix, received_at=received_at)
+    pose_to_matrix(position, quaternion)
+    xyz = (float(position[0]), float(position[1]), float(position[2]))
+    qx, qy, qz, qw = (float(value) for value in quaternion)
+    norm = math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw)
+    unit_quaternion = (qx / norm, qy / norm, qz / norm, qw / norm)
+    ensure_workspace(xyz, workspace_min, workspace_max)
+    return EndPoseCommand(position=xyz, quaternion=unit_quaternion, received_at=received_at)
 
 
 def validate_robot_state_joints(joints: Sequence[float]) -> tuple[float, ...]:
