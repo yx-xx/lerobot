@@ -36,10 +36,12 @@ teleop.connect()
 print("Connected. Reading joints (deg), endpose (mm / deg), teaching pendant.")
 
 start = time.perf_counter()
+last = None
 try:
     while time.perf_counter() - start < DURATION_S:
         t0 = time.perf_counter()
         state = teleop.get_state()
+        last = state
         print(
             " ".join(f"{state[key]:7.2f}" for key in teleop.joint_features),
             "|",
@@ -49,4 +51,9 @@ try:
 except KeyboardInterrupt:
     print("Stopped.")
 finally:
+    if last is not None:
+        print(
+            "PIPER_REF_RPY_DEG = "
+            f"({last['endpose.roll']:.2f}, {last['endpose.pitch']:.2f}, {last['endpose.yaw']:.2f})"
+        )
     teleop.disconnect()

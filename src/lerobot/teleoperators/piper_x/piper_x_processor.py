@@ -8,7 +8,7 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -101,6 +101,50 @@ def _rpy_zyx_to_rotation(roll: float, pitch: float, yaw: float) -> Rotation:
     )
 
 
+def _finite_rpy_deg(values: tuple[float, float, float], name: str) -> tuple[float, float, float]:
+    if len(values) != 3:
+        raise ValueError(f"{name} must be (roll, pitch, yaw) in degrees")
+    if any(
+        isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value)
+        for value in values
+    ):
+        raise ValueError(f"{name} values must be finite numbers")
+    return (float(values[0]), float(values[1]), float(values[2]))
+
+
+def _finite_quat_xyzw(
+    values: tuple[float, float, float, float], name: str
+) -> tuple[float, float, float, float]:
+    if len(values) != 4:
+        raise ValueError(f"{name} must be (qx, qy, qz, qw)")
+    if any(
+        isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value)
+        for value in values
+    ):
+        raise ValueError(f"{name} values must be finite numbers")
+    quat = np.asarray(values, dtype=float)
+    norm = float(np.linalg.norm(quat))
+    if norm < 1e-8:
+        raise ValueError(f"{name} must be a non-zero quaternion")
+    quat = quat / norm
+    return (float(quat[0]), float(quat[1]), float(quat[2]), float(quat[3]))
+
+
+def align_rotation_from_corresponding_poses(
+    piper_rpy_deg: tuple[float, float, float],
+    franka_quat_xyzw: tuple[float, float, float, float],
+) -> Rotation:
+    """Build R_franka = R_align @ R_piper from one matching pair of poses."""
+    roll, pitch, yaw = piper_rpy_deg
+    piper_ref = _rpy_zyx_to_rotation(
+        roll=np.deg2rad(roll),
+        pitch=np.deg2rad(pitch),
+        yaw=np.deg2rad(yaw),
+    )
+    franka_ref = Rotation.from_quat(np.asarray(franka_quat_xyzw, dtype=float))
+    return franka_ref * piper_ref.inv()
+
+
 def _require_finite(values: dict[str, float], keys: tuple[str, ...], label: str) -> None:
     missing = [key for key in keys if key not in values]
     if missing:
@@ -121,20 +165,34 @@ class MapPiperXEndposeToFrankaAction(RobotActionProcessorStep):
 
     Position is an axis-aligned cuboid map: each Piper XYZ millimetre range is
     linearly mapped onto the matching Franka XYZ metre range. Teaching pendant
-    millimetres are mapped onto Franka gripper metres the same way. Orientation
-    stays an absolute ZYX RPY to XYZW conversion.
+    millimetres are mapped onto Franka gripper metres the same way.
+
+    Orientation uses one corresponding pose pair. When Piper is at
+    ``piper_ref_rpy_deg``, Franka should be at ``franka_ref_quat_xyzw``. Later
+    poses keep that fixed frame offset:
+    ``R_franka = R_franka_ref @ R_piper_ref.inv() @ R_piper``.
     """
 
     piper_xyz_mm: Box3
     franka_xyz_m: Box3
     pendant_mm: AxisRange
     gripper_m: AxisRange
+    piper_ref_rpy_deg: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    franka_ref_quat_xyzw: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
+    _align: Rotation = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.piper_xyz_mm = _validate_box(self.piper_xyz_mm, "piper_xyz_mm")
         self.franka_xyz_m = _validate_box(self.franka_xyz_m, "franka_xyz_m")
         self.pendant_mm = _finite_pair(self.pendant_mm, "pendant_mm")
         self.gripper_m = _finite_pair(self.gripper_m, "gripper_m")
+        self.piper_ref_rpy_deg = _finite_rpy_deg(self.piper_ref_rpy_deg, "piper_ref_rpy_deg")
+        self.franka_ref_quat_xyzw = _finite_quat_xyzw(
+            self.franka_ref_quat_xyzw, "franka_ref_quat_xyzw"
+        )
+        self._align = align_rotation_from_corresponding_poses(
+            self.piper_ref_rpy_deg, self.franka_ref_quat_xyzw
+        )
 
     def action(self, action: RobotAction) -> RobotAction:
         _require_finite(action, PIPER_ENDPOSE_KEYS, "Piper-X action")
@@ -146,7 +204,7 @@ class MapPiperXEndposeToFrankaAction(RobotActionProcessorStep):
             )
             for index, axis in enumerate("xyz")
         ]
-        rotation = _rpy_zyx_to_rotation(
+        rotation = self._align * _rpy_zyx_to_rotation(
             roll=np.deg2rad(float(action["endpose.roll"])),
             pitch=np.deg2rad(float(action["endpose.pitch"])),
             yaw=np.deg2rad(float(action["endpose.yaw"])),
@@ -193,6 +251,8 @@ def make_piper_x_to_franka_teleop_processor(
     franka_xyz_m: Box3,
     pendant_mm: AxisRange,
     gripper_m: AxisRange,
+    piper_ref_rpy_deg: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    franka_ref_quat_xyzw: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0),
 ) -> RobotProcessorPipeline[tuple[RobotAction, RobotObservation], RobotAction]:
     return RobotProcessorPipeline[tuple[RobotAction, RobotObservation], RobotAction](
         steps=[
@@ -201,6 +261,8 @@ def make_piper_x_to_franka_teleop_processor(
                 franka_xyz_m=franka_xyz_m,
                 pendant_mm=pendant_mm,
                 gripper_m=gripper_m,
+                piper_ref_rpy_deg=piper_ref_rpy_deg,
+                franka_ref_quat_xyzw=franka_ref_quat_xyzw,
             )
         ],
         to_transition=robot_action_observation_to_transition,

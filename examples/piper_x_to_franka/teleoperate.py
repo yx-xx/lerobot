@@ -30,10 +30,8 @@ Then:
 
     python examples/piper_x_to_franka/teleoperate.py
 
-Position is a cuboid-to-cuboid map. Edit the calibration block below after you
-measure each robot's reachable XYZ box. Teaching pendant millimetres map onto
-Franka gripper metres the same way. Reverse a destination pair to invert that
-axis. Orientation is still Piper RPY copied to a Franka quaternion.
+Position is a cuboid-to-cuboid map. Orientation uses one corresponding pose:
+when Piper is at PIPER_REF_RPY_DEG, Franka should be at FRANKA_REF_QUAT_XYZW.
 """
 
 import os
@@ -64,6 +62,9 @@ FRANKA_Z_M = (0.17, 0.60)
 PENDANT_MM = (51.0, 98.0)
 GRIPPER_M = (0.0045, 0.0846)
 
+# 标定：一对“看起来一样”的对应姿态。不要把两边的零位直接当同一姿态。
+PIPER_REF_RPY_DEG = (-177.32, -3.01, -86.34)
+FRANKA_REF_QUAT_XYZW = (0.0, 0.0, 0.0, 1.0)
 
 def main() -> None:
     teleop_config = PiperXTeleoperatorConfig(
@@ -81,6 +82,8 @@ def main() -> None:
         franka_xyz_m=(FRANKA_X_M, FRANKA_Y_M, FRANKA_Z_M),
         pendant_mm=PENDANT_MM,
         gripper_m=GRIPPER_M,
+        piper_ref_rpy_deg=PIPER_REF_RPY_DEG,
+        franka_ref_quat_xyzw=FRANKA_REF_QUAT_XYZW,
     )
     _, robot_action_processor, robot_observation_processor = make_default_processors()
 

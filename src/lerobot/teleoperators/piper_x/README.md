@@ -35,4 +35,4 @@ python examples/piper_x/teleoperate.py
 python examples/piper_x_to_franka/teleoperate.py
 ```
 
-末端是两套长方体的线性映射：在 `examples/piper_x_to_franka/teleoperate.py` 里填 Piper XYZ（毫米）和 Franka XYZ（米）。示教器区间同样映射到夹爪区间。目标轴两个数对调即可反向。
+末端位置是两套长方体的线性映射；姿态用一对对应姿态消掉两边法兰零位和轴定义的差别。都在 `examples/piper_x_to_franka/teleoperate.py` 里填。

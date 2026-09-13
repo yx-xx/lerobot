@@ -16,6 +16,7 @@ from lerobot.processor import TransitionKey
 from lerobot.processor.converters import create_transition
 from lerobot.teleoperators.piper_x.piper_x_processor import (
     MapPiperXEndposeToFrankaAction,
+    align_rotation_from_corresponding_poses,
     make_piper_x_to_franka_teleop_processor,
     map_calibrated_range,
 )
@@ -123,10 +124,35 @@ def test_reversed_destination_inverts_axis():
     assert mapped["end_pose.x"] == 0.20
 
 
-def test_absolute_yaw_maps_to_franka_quaternion():
+def test_identity_refs_keep_piper_yaw_as_franka_quaternion():
     processor = _processor()
     mapped = _apply(processor, _piper_action(x=0.0, yaw=90.0))
     expected = Rotation.from_rotvec(np.array([0.0, 0.0, math.pi / 2.0])).as_quat()
+    _assert_quat_close(
+        [mapped["end_pose.qx"], mapped["end_pose.qy"], mapped["end_pose.qz"], mapped["end_pose.qw"]],
+        expected,
+    )
+
+
+def test_corresponding_pose_maps_piper_ref_to_franka_ref():
+    franka_ref = Rotation.from_rotvec(np.array([0.0, math.pi / 2.0, 0.0])).as_quat()
+    processor = _processor(
+        piper_ref_rpy_deg=(10.0, -20.0, 30.0),
+        franka_ref_quat_xyzw=tuple(franka_ref),
+    )
+    mapped = _apply(processor, _piper_action(roll=10.0, pitch=-20.0, yaw=30.0))
+    _assert_quat_close(
+        [mapped["end_pose.qx"], mapped["end_pose.qy"], mapped["end_pose.qz"], mapped["end_pose.qw"]],
+        franka_ref,
+    )
+
+
+def test_relative_piper_rotation_is_applied_after_alignment():
+    franka_ref = Rotation.from_rotvec(np.array([math.pi / 2.0, 0.0, 0.0]))
+    align = align_rotation_from_corresponding_poses((0.0, 0.0, 0.0), tuple(franka_ref.as_quat()))
+    processor = _processor(franka_ref_quat_xyzw=tuple(franka_ref.as_quat()))
+    mapped = _apply(processor, _piper_action(yaw=90.0))
+    expected = (align * Rotation.from_rotvec(np.array([0.0, 0.0, math.pi / 2.0]))).as_quat()
     _assert_quat_close(
         [mapped["end_pose.qx"], mapped["end_pose.qy"], mapped["end_pose.qz"], mapped["end_pose.qw"]],
         expected,
