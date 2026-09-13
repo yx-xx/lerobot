@@ -17,6 +17,16 @@ pip install -e ".[feetech]"
 pip install scipy==1.15.3
 ```
 
+
+## 启动
+```bash
+conda activate lerobotx
+source /opt/ros/humble/setup.bash
+export ROS_DOMAIN_ID=23
+python examples/piper_x_to_franka/teleoperate.py
+```
+
+
 ## 项目结构
 
 ```

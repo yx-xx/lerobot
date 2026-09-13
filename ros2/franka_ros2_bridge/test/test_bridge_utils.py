@@ -17,6 +17,7 @@ from franka_ros2_bridge.core.types import (
     GRIPPER_JOINT_NAME,
     JOINT_NAMES,
     EndPose,
+    EndPoseCommand,
     JointCommand,
     RobotState,
 )
@@ -124,6 +125,21 @@ def test_build_end_pose_command_checks_frame_and_workspace() -> None:
             workspace_max=(0.8, 0.6, 0.9),
             received_at=1.0,
         )
+
+
+def test_command_queue_take_zero_timeout_is_nonblocking() -> None:
+    queue = CommandQueue(timeout_sec=1.0)
+    assert queue.take(wait_timeout_sec=0.0) is None
+    queue.push_end_pose(
+        EndPoseCommand(
+            position=(0.4, 0.0, 0.3),
+            quaternion=(0.0, 0.0, 0.0, 1.0),
+            received_at=time.monotonic(),
+        )
+    )
+    command = queue.take(wait_timeout_sec=0.0)
+    assert command is not None
+    assert command.mode == "cartesian"
 
 
 def test_command_queue_keeps_latest_and_detects_stale() -> None:

@@ -155,31 +155,49 @@ class FrankxController:
             self._last_state = sampled
         return sampled
 
-    def move_joint(self, command: JointCommand) -> None:
+    def start_joint(self, command: JointCommand) -> None:
+        self.stop_arm()
         with self._lock:
             robot = self._require_robot()
             frankx = self._frankx
             self._apply_dynamics(robot)
-            motion = frankx.JointMotion(list(command.positions))
-            thread = robot.move_async(motion)
+            thread = robot.move_async(frankx.JointMotion(list(command.positions)))
             self._arm_motion_thread = thread
-        try:
-            self._wait_for_motion(robot, thread)
-        finally:
-            self._clear_arm_motion(thread)
+
+    def start_end_pose(self, command: EndPoseCommand) -> None:
+        self.stop_arm()
+        with self._lock:
+            robot = self._require_robot()
+            frankx = self._frankx
+            self._apply_dynamics(robot)
+            thread = robot.move_async(frankx.LinearMotion(self._affine_from_end_pose(command)))
+            self._arm_motion_thread = thread
+
+    def move_joint(self, command: JointCommand) -> None:
+        self.start_joint(command)
+        self._wait_for_current_motion()
 
     def move_end_pose(self, command: EndPoseCommand) -> None:
+        self.start_end_pose(command)
+        self._wait_for_current_motion()
+
+    def stop_arm(self) -> None:
         with self._lock:
-            robot = self._require_robot()
-            frankx = self._frankx
-            self._apply_dynamics(robot)
-            motion = frankx.LinearMotion(self._affine_from_end_pose(command))
-            thread = robot.move_async(motion)
-            self._arm_motion_thread = thread
-        try:
-            self._wait_for_motion(robot, thread)
-        finally:
+            robot = self._robot
+            thread = self._arm_motion_thread
+        if robot is not None:
+            try:
+                robot.stop()
+            except Exception:
+                pass
+        if thread is not None:
+            thread.join(timeout=2.0)
             self._clear_arm_motion(thread)
+
+    def arm_is_moving(self) -> bool:
+        with self._lock:
+            thread = self._arm_motion_thread
+        return thread is not None and thread.is_alive()
 
     def move_gripper(self, command: GripperCommand) -> None:
         with self._gripper_lock:
@@ -201,15 +219,21 @@ class FrankxController:
         qx, qy, qz, qw = command.quaternion
         return self._Affine(x, y, z, qw, qx, qy, qz)
 
-    def _wait_for_motion(self, robot: Any, thread: Any) -> None:
+    def _wait_for_current_motion(self) -> None:
+        with self._lock:
+            robot = self._robot
+            thread = self._arm_motion_thread
+        if thread is None:
+            return
         while thread.is_alive() and not self._stop.is_set():
             thread.join(timeout=0.5)
-        if self._stop.is_set() and thread.is_alive():
+        if self._stop.is_set() and thread.is_alive() and robot is not None:
             try:
                 robot.stop()
             except Exception:
                 pass
             thread.join(timeout=2.0)
+        self._clear_arm_motion(thread)
 
     def _require_robot(self) -> Any:
         if self._robot is None or self._frankx is None or self._Affine is None:

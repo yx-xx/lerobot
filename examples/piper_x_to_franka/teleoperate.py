@@ -34,6 +34,7 @@ Position is a cuboid-to-cuboid map. Orientation uses one corresponding pose:
 when Piper is at PIPER_REF_RPY_DEG, Franka should be at FRANKA_REF_QUAT_XYZW.
 """
 
+import math
 import os
 
 from lerobot.processor import make_default_processors
@@ -46,7 +47,7 @@ from lerobot.teleoperators.piper_x import (
 )
 from lerobot.utils.visualization_utils import _init_rerun
 
-FPS = 15
+FPS = 20
 
 # 标定：Piper 末端工作空间，单位毫米，相对 Piper 基座。
 PIPER_X_MM = (130.0, 450.0)
@@ -74,6 +75,9 @@ def main() -> None:
     robot_config = FrankaConfig(
         id="panda",
         control_mode="cartesian",
+        state_timeout_s=3.0,
+        max_relative_translation=0.15,
+        max_relative_rotation=math.radians(30.0),
     )
     teleop = make_teleoperator_from_config(teleop_config)
     robot = FrankaRobot(robot_config)

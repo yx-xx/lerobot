@@ -222,22 +222,39 @@ class FrankaBridgeNode(Node):
         self._commands.push_gripper(command)
 
     def _command_worker(self) -> None:
+        # 遥操作要跟最新目标：运动中若来了新命令，停掉当前点到点，立刻改去新点。
+        # 以前会等 LinearMotion 走完再取下一条，看起来就会很卡。
         while not self._stop_event.is_set():
-            command = self._commands.take(wait_timeout_sec=0.1)
-            if command is None:
+            command = self._commands.take(wait_timeout_sec=0.05)
+            while command is not None and not self._stop_event.is_set():
+                if self._commands.is_stale(command):
+                    self.get_logger().warning(f"Dropped stale {command.mode} command")
+                    command = self._commands.take(wait_timeout_sec=0.0)
+                    continue
+                try:
+                    if command.mode == "joint":
+                        assert command.joint is not None
+                        self._controller.start_joint(command.joint)
+                    else:
+                        assert command.end_pose is not None
+                        self._controller.start_end_pose(command.end_pose)
+                except Exception as exc:
+                    self.get_logger().error(f"Motion failed: {exc}")
+                    command = None
+                    break
+                command = self._wait_for_newer_command()
+
+    def _wait_for_newer_command(self) -> Any:
+        while self._controller.arm_is_moving() and not self._stop_event.is_set():
+            newer = self._commands.take(wait_timeout_sec=0.02)
+            if newer is None:
                 continue
-            if self._commands.is_stale(command):
-                self.get_logger().warning(f"Dropped stale {command.mode} command")
+            if self._commands.is_stale(newer):
+                self.get_logger().warning(f"Dropped stale {newer.mode} command")
                 continue
-            try:
-                if command.mode == "joint":
-                    assert command.joint is not None
-                    self._controller.move_joint(command.joint)
-                else:
-                    assert command.end_pose is not None
-                    self._controller.move_end_pose(command.end_pose)
-            except Exception as exc:
-                self.get_logger().error(f"Motion failed: {exc}")
+            self._controller.stop_arm()
+            return newer
+        return None
 
     def _gripper_worker_loop(self) -> None:
         while not self._stop_event.is_set():
