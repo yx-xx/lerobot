@@ -132,7 +132,9 @@ class FrankaBridgeNode(Node):
             jerk_rel=jerk_rel,
             gripper_speed=gripper_speed,
         )
+        self._last_published_state = None
         self._controller.connect()
+        self._last_published_state = self._controller.read_state()
         self._commands = CommandQueue(self.command_timeout)
         self._stop_event = threading.Event()
 
@@ -253,9 +255,13 @@ class FrankaBridgeNode(Node):
     def _publish_state(self) -> None:
         try:
             state = self._controller.read_state()
+            self._last_published_state = state
         except Exception as exc:
-            self.get_logger().error(f"State read failed: {exc}")
-            return
+            state = getattr(self, "_last_published_state", None)
+            if state is None:
+                self.get_logger().error(f"State read failed: {exc}")
+                return
+            self.get_logger().warning(f"State read failed, republishing last sample: {exc}")
 
         stamp = self.get_clock().now().to_msg()
         joint_message = to_joint_state_msg(

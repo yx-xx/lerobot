@@ -49,6 +49,8 @@ class FrankxController:
         self._lock = threading.Lock()
         self._gripper_lock = threading.Lock()
         self._stop = threading.Event()
+        self._last_state: RobotState | None = None
+        self._arm_motion_thread: threading.Thread | None = None
 
     def connect(self) -> None:
         try:
@@ -74,6 +76,8 @@ class FrankxController:
             robot.recover_from_errors()
             self._apply_dynamics(robot)
             self._robot = robot
+            self._last_state = None
+            self._arm_motion_thread = None
             gripper = frankx.Gripper(self._robot_ip)
             gripper.gripper_speed = self._gripper_speed
             self._gripper = gripper
@@ -85,6 +89,8 @@ class FrankxController:
             self._robot = None
             self._frankx = None
             self._Affine = None
+            self._last_state = None
+            self._arm_motion_thread = None
         with self._gripper_lock:
             self._gripper = None
         if robot is not None:
@@ -96,25 +102,30 @@ class FrankxController:
     def read_state(self) -> RobotState:
         with self._lock:
             robot = self._require_robot()
-            state = robot.read_once()
-            joints = validate_robot_state_joints(state.q)
-            pose = robot.current_pose()
-            translation = tuple(float(value) for value in pose.translation())
-            quaternion = tuple(float(value) for value in pose.quaternion())
-        with self._gripper_lock:
-            gripper = self._gripper
-            if gripper is None:
-                raise RuntimeError("FrankxController is not connected")
-            width = float(gripper.width())
+            try:
+                joints = validate_robot_state_joints(self._read_joints(robot))
+                pose = self._read_pose(robot)
+                translation = tuple(float(value) for value in pose.translation())
+                quaternion = tuple(float(value) for value in pose.quaternion())
+            except Exception:
+                if self._last_state is None:
+                    raise
+                joints = self._last_state.joints
+                translation = self._last_state.end_pose.position
+                quaternion = self._last_state.end_pose.quaternion
+        width = self._read_gripper_width()
         if len(translation) != 3 or len(quaternion) != 4:
             raise RuntimeError("robot returned an invalid end pose")
         if not math.isfinite(width):
             raise RuntimeError("robot returned an invalid gripper width")
-        return RobotState(
+        sampled = RobotState(
             joints=joints,
             end_pose=EndPose(position=translation, quaternion=quaternion),
             gripper_width=width,
         )
+        with self._lock:
+            self._last_state = sampled
+        return sampled
 
     def move_joint(self, command: JointCommand) -> None:
         with self._lock:
@@ -123,7 +134,11 @@ class FrankxController:
             self._apply_dynamics(robot)
             motion = frankx.JointMotion(list(command.positions))
             thread = robot.move_async(motion)
-        self._wait_for_motion(robot, thread)
+            self._arm_motion_thread = thread
+        try:
+            self._wait_for_motion(robot, thread)
+        finally:
+            self._clear_arm_motion(thread)
 
     def move_end_pose(self, command: EndPoseCommand) -> None:
         with self._lock:
@@ -132,7 +147,11 @@ class FrankxController:
             self._apply_dynamics(robot)
             motion = frankx.LinearMotion(self._affine_from_end_pose(command))
             thread = robot.move_async(motion)
-        self._wait_for_motion(robot, thread)
+            self._arm_motion_thread = thread
+        try:
+            self._wait_for_motion(robot, thread)
+        finally:
+            self._clear_arm_motion(thread)
 
     def move_gripper(self, command: GripperCommand) -> None:
         with self._gripper_lock:
@@ -140,7 +159,8 @@ class FrankxController:
             if gripper is None:
                 raise RuntimeError("FrankxController is not connected")
             gripper.gripper_speed = self._gripper_speed
-            gripper.move(float(command.width))
+        # 不要在阻塞的 move() 期间握着锁，否则状态发布会被夹爪运动卡住。
+        gripper.move(float(command.width))
 
     def _apply_dynamics(self, robot: Any) -> None:
         robot.velocity_rel = self._velocity_rel
@@ -167,3 +187,33 @@ class FrankxController:
         if self._robot is None or self._frankx is None or self._Affine is None:
             raise RuntimeError("FrankxController is not connected")
         return self._robot
+
+    def _read_joints(self, robot: Any) -> tuple[float, ...]:
+        getter = getattr(robot, "current_joint_positions", None)
+        if getter is None:
+            raise RuntimeError("frankx Robot.current_joint_positions() is unavailable")
+        return tuple(float(value) for value in getter())
+
+    def _read_pose(self, robot: Any) -> Any:
+        return robot.current_pose()
+
+    def _clear_arm_motion(self, thread: Any) -> None:
+        with self._lock:
+            if self._arm_motion_thread is thread:
+                self._arm_motion_thread = None
+
+    def _read_gripper_width(self) -> float:
+        with self._gripper_lock:
+            gripper = self._gripper
+            if gripper is None:
+                raise RuntimeError("FrankxController is not connected")
+            try:
+                width = float(gripper.width())
+            except Exception:
+                width = float("nan")
+        if math.isfinite(width):
+            return width
+        with self._lock:
+            if self._last_state is not None:
+                return self._last_state.gripper_width
+        raise RuntimeError("robot returned an invalid gripper width")

@@ -16,6 +16,7 @@
 
 import logging
 import math
+import os
 import threading
 import time
 from functools import cached_property
@@ -360,8 +361,22 @@ class FrankaRobot(Robot):
                 ):
                     return
             time.sleep(0.01)
+        missing = []
+        with self._lock:
+            if self._joint_positions is None:
+                missing.append(self.config.joint_state_topic)
+            if self._end_pose is None:
+                missing.append(self.config.end_pose_topic)
+            if self._gripper_width is None:
+                missing.append(self.config.gripper_state_topic)
+        domain = os.environ.get("ROS_DOMAIN_ID", "0")
         raise RuntimeError(
-            "Timed out waiting for complete Franka joint state, end-effector pose, and gripper."
+            "Timed out waiting for Franka ROS topics: "
+            + ", ".join(missing)
+            + f". ROS_DOMAIN_ID={domain}. "
+            "On this machine: source /opt/ros/humble/setup.bash && export ROS_DOMAIN_ID=23. "
+            "Then run ros2 topic echo --once on the missing topics. "
+            "The control PC must already be running franka_ros2_bridge with the same domain."
         )
 
     def _cleanup(self) -> None:

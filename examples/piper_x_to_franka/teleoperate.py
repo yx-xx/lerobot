@@ -64,7 +64,7 @@ GRIPPER_M = (0.0045, 0.0846)
 
 # 标定：一对“看起来一样”的对应姿态。不要把两边的零位直接当同一姿态。
 PIPER_REF_RPY_DEG = (-177.32, -3.01, -86.34)
-FRANKA_REF_QUAT_XYZW = (0.0, 0.0, 0.0, 1.0)
+FRANKA_REF_QUAT_XYZW = (0.000217, 0.000293, -0.383081, 0.923715)
 
 def main() -> None:
     teleop_config = PiperXTeleoperatorConfig(
