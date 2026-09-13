@@ -87,5 +87,10 @@ def make_teleoperator_from_config(config: TeleoperatorConfig) -> Teleoperator:
         from .OMY_L100 import OMYL100
         return OMYL100(config)
 
+    elif config.type == "piper_x":
+        from .piper_x import PiperXTeleoperator
+
+        return PiperXTeleoperator(config)
+
     else:
         raise ValueError(config.type)

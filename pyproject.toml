@@ -112,6 +112,7 @@ intelrealsense = [
     "pyrealsense2-macosx>=2.54 ; sys_platform == 'darwin'",
 ]
 phone = ["hebi-py>=2.8.0", "teleop>=0.1.0"]
+piper = ["python-can>=3.3.4", "typing-extensions>=3.7.4.3"]
 # stretch = [
 #     "hello-robot-stretch-body>=0.7.27 ; sys_platform == 'linux'",
 #     "pyrender @ git+https://github.com/mmatl/pyrender.git ; sys_platform == 'linux'",
@@ -158,6 +159,7 @@ all = [
     "lerobot[pusht]",
     "lerobot[xarm]",
     "lerobot[phone]",
+    "lerobot[piper]",
     "lerobot[libero]",
 ]
 

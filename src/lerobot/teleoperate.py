@@ -86,6 +86,7 @@ from lerobot.teleoperators import (  # noqa: F401
     homunculus,
     koch_leader,
     make_teleoperator_from_config,
+    piper_x,
     so100_leader,
     so101_leader,
 )
