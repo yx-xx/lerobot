@@ -10,11 +10,17 @@
 
 from .configuration_piper_x import PiperXTeleoperatorConfig
 from .piper_x import ENDPOSE_FEATURES, JOINT_FEATURES, PiperXTeleoperator, TEACHING_PENDANT_FEATURES
+from .piper_x_processor import (
+    MapPiperXEndposeToFrankaAction,
+    make_piper_x_to_franka_teleop_processor,
+)
 
 __all__ = [
     "ENDPOSE_FEATURES",
     "JOINT_FEATURES",
+    "MapPiperXEndposeToFrankaAction",
     "PiperXTeleoperator",
     "PiperXTeleoperatorConfig",
     "TEACHING_PENDANT_FEATURES",
+    "make_piper_x_to_franka_teleop_processor",
 ]

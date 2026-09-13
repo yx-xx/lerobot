@@ -6,7 +6,13 @@ import math
 from typing import Sequence
 
 from franka_ros2_bridge.core.math_utils import finite, matrix_to_pose, pose_to_matrix
-from franka_ros2_bridge.core.types import JOINT_NAMES, EndPose, EndPoseCommand, JointCommand
+from franka_ros2_bridge.core.types import (
+    JOINT_NAMES,
+    EndPose,
+    EndPoseCommand,
+    GripperCommand,
+    JointCommand,
+)
 
 
 def validate_joint_positions(
@@ -85,6 +91,26 @@ def build_end_pose_command(
     unit_quaternion = (qx / norm, qy / norm, qz / norm, qw / norm)
     ensure_workspace(xyz, workspace_min, workspace_max)
     return EndPoseCommand(position=xyz, quaternion=unit_quaternion, received_at=received_at)
+
+
+def build_gripper_command(
+    width: float,
+    *,
+    min_width: float,
+    max_width: float,
+    received_at: float,
+) -> GripperCommand:
+    if not math.isfinite(width):
+        raise ValueError("gripper width must be finite")
+    if (
+        not math.isfinite(min_width)
+        or not math.isfinite(max_width)
+        or min_width < 0.0
+        or max_width < min_width
+    ):
+        raise ValueError("gripper limits must be finite and increasing")
+    clipped = min(max(float(width), float(min_width)), float(max_width))
+    return GripperCommand(width=clipped, received_at=received_at)
 
 
 def validate_robot_state_joints(joints: Sequence[float]) -> tuple[float, ...]:

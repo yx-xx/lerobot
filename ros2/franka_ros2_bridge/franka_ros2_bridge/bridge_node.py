@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from typing import Any, Sequence
 
 from franka_ros2_bridge.core.command_queue import CommandQueue
-from franka_ros2_bridge.core.safety import build_end_pose_command, build_joint_command
+from franka_ros2_bridge.core.safety import (
+    build_end_pose_command,
+    build_gripper_command,
+    build_joint_command,
+)
 from franka_ros2_bridge.core.types import (
+    DEFAULT_GRIPPER_MAX,
+    DEFAULT_GRIPPER_MIN,
     DEFAULT_JOINT_LOWER_LIMITS,
     DEFAULT_JOINT_UPPER_LIMITS,
     JOINT_NAMES,
@@ -17,7 +24,9 @@ from franka_ros2_bridge.control.frankx_controller import FrankxController
 from franka_ros2_bridge.ros.converters import (
     end_pose_cmd_from_msg,
     joint_cmd_from_msg,
+    gripper_cmd_from_msg,
     to_end_pose_msg,
+    to_gripper_state_msg,
     to_joint_state_msg,
 )
 
@@ -62,6 +71,11 @@ class FrankaBridgeNode(Node):
         self.declare_parameter("joint_upper_limits", list(DEFAULT_JOINT_UPPER_LIMITS))
         self.declare_parameter("workspace_min", [0.20, -0.60, 0.02])
         self.declare_parameter("workspace_max", [0.80, 0.60, 0.90])
+        self.declare_parameter("gripper_state_topic", "/franka/gripper_state")
+        self.declare_parameter("gripper_cmd_topic", "/franka/gripper_cmd")
+        self.declare_parameter("gripper_min", DEFAULT_GRIPPER_MIN)
+        self.declare_parameter("gripper_max", DEFAULT_GRIPPER_MAX)
+        self.declare_parameter("gripper_speed", 0.04)
 
         self.base_frame = str(self.get_parameter("base_frame").value)
         self.command_timeout = float(self.get_parameter("command_timeout_sec").value)
@@ -73,10 +87,13 @@ class FrankaBridgeNode(Node):
         )
         self.workspace_min = tuple(float(v) for v in self.get_parameter("workspace_min").value)
         self.workspace_max = tuple(float(v) for v in self.get_parameter("workspace_max").value)
+        self.gripper_min = float(self.get_parameter("gripper_min").value)
+        self.gripper_max = float(self.get_parameter("gripper_max").value)
         rate = float(self.get_parameter("publish_rate_hz").value)
         velocity_rel = float(self.get_parameter("velocity_rel").value)
         acceleration_rel = float(self.get_parameter("acceleration_rel").value)
         jerk_rel = float(self.get_parameter("jerk_rel").value)
+        gripper_speed = float(self.get_parameter("gripper_speed").value)
 
         if rate <= 0.0 or self.command_timeout <= 0.0:
             raise ValueError("publish_rate_hz and command_timeout_sec must be positive")
@@ -100,12 +117,20 @@ class FrankaBridgeNode(Node):
             )
         ):
             raise ValueError("workspace_min/max must define three increasing bounds")
+        if (
+            not math.isfinite(self.gripper_min)
+            or not math.isfinite(self.gripper_max)
+            or self.gripper_min < 0.0
+            or self.gripper_max < self.gripper_min
+        ):
+            raise ValueError("gripper_min/max must be finite and increasing")
 
         self._controller = FrankxController(
             str(self.get_parameter("robot_ip").value),
             velocity_rel=velocity_rel,
             acceleration_rel=acceleration_rel,
             jerk_rel=jerk_rel,
+            gripper_speed=gripper_speed,
         )
         self._controller.connect()
         self._commands = CommandQueue(self.command_timeout)
@@ -116,6 +141,9 @@ class FrankaBridgeNode(Node):
         )
         self._end_pose_pub = self.create_publisher(
             PoseStamped, str(self.get_parameter("end_pose_topic").value), 10
+        )
+        self._gripper_state_pub = self.create_publisher(
+            JointStateMsg, str(self.get_parameter("gripper_state_topic").value), 10
         )
         self.create_subscription(
             JointStateMsg,
@@ -129,11 +157,21 @@ class FrankaBridgeNode(Node):
             self._on_end_pose_cmd,
             10,
         )
+        self.create_subscription(
+            JointStateMsg,
+            str(self.get_parameter("gripper_cmd_topic").value),
+            self._on_gripper_cmd,
+            10,
+        )
         self.create_timer(1.0 / rate, self._publish_state)
         self._worker = threading.Thread(
             target=self._command_worker, name="franka-command-worker", daemon=True
         )
+        self._gripper_worker = threading.Thread(
+            target=self._gripper_worker_loop, name="franka-gripper-worker", daemon=True
+        )
         self._worker.start()
+        self._gripper_worker.start()
 
     def _on_joint_cmd(self, message: JointStateMsg) -> None:
         try:
@@ -167,6 +205,20 @@ class FrankaBridgeNode(Node):
             return
         self._commands.push_end_pose(command)
 
+    def _on_gripper_cmd(self, message: JointStateMsg) -> None:
+        try:
+            width = gripper_cmd_from_msg(message)
+            command = build_gripper_command(
+                width,
+                min_width=self.gripper_min,
+                max_width=self.gripper_max,
+                received_at=time.monotonic(),
+            )
+        except (TypeError, ValueError) as exc:
+            self.get_logger().warning(f"Rejected gripper_cmd: {exc}")
+            return
+        self._commands.push_gripper(command)
+
     def _command_worker(self) -> None:
         while not self._stop_event.is_set():
             command = self._commands.take(wait_timeout_sec=0.1)
@@ -185,6 +237,19 @@ class FrankaBridgeNode(Node):
             except Exception as exc:
                 self.get_logger().error(f"Motion failed: {exc}")
 
+    def _gripper_worker_loop(self) -> None:
+        while not self._stop_event.is_set():
+            command = self._commands.take_gripper(wait_timeout_sec=0.1)
+            if command is None:
+                continue
+            if self._commands.is_gripper_stale(command):
+                self.get_logger().warning("Dropped stale gripper command")
+                continue
+            try:
+                self._controller.move_gripper(command)
+            except Exception as exc:
+                self.get_logger().error(f"Gripper motion failed: {exc}")
+
     def _publish_state(self) -> None:
         try:
             state = self._controller.read_state()
@@ -199,8 +264,12 @@ class FrankaBridgeNode(Node):
         end_pose_message = to_end_pose_msg(
             PoseStamped(), state, stamp=stamp, frame_id=self.base_frame
         )
+        gripper_message = to_gripper_state_msg(
+            JointStateMsg(), state, stamp=stamp, frame_id=self.base_frame
+        )
         self._joint_state_pub.publish(joint_message)
         self._end_pose_pub.publish(end_pose_message)
+        self._gripper_state_pub.publish(gripper_message)
 
     def destroy_node(self) -> bool:
         self._stop_event.set()
@@ -210,6 +279,7 @@ class FrankaBridgeNode(Node):
         except Exception:
             self.get_logger().exception("Failed to disconnect Franka controller")
         self._worker.join(timeout=2.0)
+        self._gripper_worker.join(timeout=2.0)
         return super().destroy_node()
 
 

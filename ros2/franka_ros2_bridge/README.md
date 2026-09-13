@@ -64,8 +64,10 @@ source install/setup.bash
 
 - 发布 `/franka/joint_state` (`sensor_msgs/JointState`)
 - 发布 `/franka/end_pose` (`geometry_msgs/PoseStamped`)
+- 发布 `/franka/gripper_state` (`sensor_msgs/JointState`，`name=panda_finger`，开口单位米)
 - 订阅 `/franka/joint_cmd` (`sensor_msgs/JointState`)
 - 订阅 `/franka/end_pose_cmd` (`geometry_msgs/PoseStamped`)
+- 订阅 `/franka/gripper_cmd` (`sensor_msgs/JointState`，`name=panda_finger`，开口单位米)
 
 关节命令与状态使用同一消息类型：`name` 必须严格为 `panda_joint1` 到 `panda_joint7`，
 `position` 为目标关节角（弧度），且位于配置的关节限位内。末端命令的 `frame_id` 必须为空
@@ -73,9 +75,9 @@ source install/setup.bash
 回调只替换“最新命令”；工作线程串行执行，并丢弃超过 `command_timeout_sec` 的命令。
 运动用 `move_async` 在后台执行，状态发布在运动期间仍可继续。
 
-所有参数均位于 YAML 中，包括 IP、四个 topic、`base_frame`、发布频率、相对速度/
-加速度/加加速度、命令超时、7 轴关节限位和 XYZ workspace 边界。
-末端位姿单位为米 + XYZW 四元数。
+所有参数均位于 YAML 中，包括 IP、话题、`base_frame`、发布频率、相对速度/
+加速度/加加速度、命令超时、7 轴关节限位、XYZ workspace 边界和夹爪开合范围。
+末端位姿单位为米 + XYZW 四元数；夹爪开口单位为米。夹爪在独立工作线程里跟最新目标。
 
 ## 安全启动
 

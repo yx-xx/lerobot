@@ -16,6 +16,7 @@ Check the bridge before starting LeRobot:
 ```bash
 ros2 topic hz /franka/joint_state
 ros2 topic echo --once /franka/end_pose
+ros2 topic echo --once /franka/gripper_state
 ```
 
 Joint control:
@@ -36,12 +37,13 @@ lerobot-record \
   --robot.control_mode=cartesian
 ```
 
-Observations always contain `j1.pos` through `j7.pos` and
-`end_pose.x/y/z/qx/qy/qz/qw`. `send_action()` follows
-`control_mode`; application code may call `send_joint_action()` or
-`send_end_pose()` explicitly. Joint commands use `sensor_msgs/JointState`;
-end-pose commands use `geometry_msgs/PoseStamped`. Topic names, timeouts,
-base frame, QoS depth, and per-step safety limits are configurable.
+Observations always contain `j1.pos` through `j7.pos`,
+`end_pose.x/y/z/qx/qy/qz/qw`, and `gripper.pos` (metres).
+`send_action()` follows `control_mode` and always includes `gripper.pos`.
+Joint commands use `sensor_msgs/JointState`; end-pose commands use
+`geometry_msgs/PoseStamped`; gripper commands use `sensor_msgs/JointState`
+with name `panda_finger`. Topic names, timeouts, base frame, QoS depth,
+and per-step safety limits are configurable.
 
 The bridge uses latest-target point-to-point motion, not a hard real-time
 streaming controller. Keep Franka Desk collision protection and emergency stop

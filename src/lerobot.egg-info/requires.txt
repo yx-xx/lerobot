@@ -41,6 +41,7 @@ lerobot[aloha]
 lerobot[pusht]
 lerobot[xarm]
 lerobot[phone]
+lerobot[piper]
 lerobot[libero]
 
 [aloha]
@@ -105,6 +106,10 @@ teleop>=0.1.0
 
 [pi0]
 lerobot[transformers-dep]
+
+[piper]
+python-can>=3.3.4
+typing-extensions>=3.7.4.3
 
 [placo-dep]
 placo>=0.9.6

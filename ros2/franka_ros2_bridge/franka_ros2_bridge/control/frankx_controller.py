@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import math
 import threading
 from typing import Any
 
 from franka_ros2_bridge.core.safety import validate_robot_state_joints
-from franka_ros2_bridge.core.types import EndPose, EndPoseCommand, JointCommand, RobotState
+from franka_ros2_bridge.core.types import (
+    EndPose,
+    EndPoseCommand,
+    GripperCommand,
+    JointCommand,
+    RobotState,
+)
 
 
 class FrankxController:
@@ -19,21 +26,28 @@ class FrankxController:
         velocity_rel: float = 0.15,
         acceleration_rel: float = 0.1,
         jerk_rel: float = 0.1,
+        gripper_speed: float = 0.04,
     ) -> None:
         if (
             not 0.0 < velocity_rel <= 1.0
             or not 0.0 < acceleration_rel <= 1.0
             or not 0.0 < jerk_rel <= 1.0
+            or not 0.0 < gripper_speed <= 1.0
         ):
-            raise ValueError("velocity_rel, acceleration_rel, and jerk_rel must be in (0, 1]")
+            raise ValueError(
+                "velocity_rel, acceleration_rel, jerk_rel, and gripper_speed must be in (0, 1]"
+            )
         self._robot_ip = robot_ip
         self._velocity_rel = velocity_rel
         self._acceleration_rel = acceleration_rel
         self._jerk_rel = jerk_rel
+        self._gripper_speed = gripper_speed
         self._frankx: Any | None = None
         self._Affine: Any | None = None
         self._robot: Any | None = None
+        self._gripper: Any | None = None
         self._lock = threading.Lock()
+        self._gripper_lock = threading.Lock()
         self._stop = threading.Event()
 
     def connect(self) -> None:
@@ -60,6 +74,9 @@ class FrankxController:
             robot.recover_from_errors()
             self._apply_dynamics(robot)
             self._robot = robot
+            gripper = frankx.Gripper(self._robot_ip)
+            gripper.gripper_speed = self._gripper_speed
+            self._gripper = gripper
 
     def disconnect(self) -> None:
         self._stop.set()
@@ -68,6 +85,8 @@ class FrankxController:
             self._robot = None
             self._frankx = None
             self._Affine = None
+        with self._gripper_lock:
+            self._gripper = None
         if robot is not None:
             try:
                 robot.stop()
@@ -82,11 +101,19 @@ class FrankxController:
             pose = robot.current_pose()
             translation = tuple(float(value) for value in pose.translation())
             quaternion = tuple(float(value) for value in pose.quaternion())
+        with self._gripper_lock:
+            gripper = self._gripper
+            if gripper is None:
+                raise RuntimeError("FrankxController is not connected")
+            width = float(gripper.width())
         if len(translation) != 3 or len(quaternion) != 4:
             raise RuntimeError("robot returned an invalid end pose")
+        if not math.isfinite(width):
+            raise RuntimeError("robot returned an invalid gripper width")
         return RobotState(
             joints=joints,
             end_pose=EndPose(position=translation, quaternion=quaternion),
+            gripper_width=width,
         )
 
     def move_joint(self, command: JointCommand) -> None:
@@ -106,6 +133,14 @@ class FrankxController:
             motion = frankx.LinearMotion(self._affine_from_end_pose(command))
             thread = robot.move_async(motion)
         self._wait_for_motion(robot, thread)
+
+    def move_gripper(self, command: GripperCommand) -> None:
+        with self._gripper_lock:
+            gripper = self._gripper
+            if gripper is None:
+                raise RuntimeError("FrankxController is not connected")
+            gripper.gripper_speed = self._gripper_speed
+            gripper.move(float(command.width))
 
     def _apply_dynamics(self, robot: Any) -> None:
         robot.velocity_rel = self._velocity_rel

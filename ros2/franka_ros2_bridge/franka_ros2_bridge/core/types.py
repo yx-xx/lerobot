@@ -7,8 +7,11 @@ from typing import Literal
 
 
 JOINT_NAMES = tuple(f"panda_joint{i}" for i in range(1, 8))
+GRIPPER_JOINT_NAME = "panda_finger"
 DEFAULT_JOINT_LOWER_LIMITS = (-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973)
 DEFAULT_JOINT_UPPER_LIMITS = (2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973)
+DEFAULT_GRIPPER_MIN = 0.0
+DEFAULT_GRIPPER_MAX = 0.08
 
 ControlMode = Literal["joint", "cartesian"]
 
@@ -23,10 +26,11 @@ class EndPose:
 
 @dataclass(frozen=True)
 class RobotState:
-    """Joint angles (rad) and end-effector pose sampled together."""
+    """Joint angles (rad), end-effector pose, and gripper width sampled together."""
 
     joints: tuple[float, ...]
     end_pose: EndPose
+    gripper_width: float
 
 
 @dataclass(frozen=True)
@@ -41,6 +45,14 @@ class EndPoseCommand:
 
     position: tuple[float, float, float]
     quaternion: tuple[float, float, float, float]
+    received_at: float
+
+
+@dataclass(frozen=True)
+class GripperCommand:
+    """Gripper opening in metres."""
+
+    width: float
     received_at: float
 
 

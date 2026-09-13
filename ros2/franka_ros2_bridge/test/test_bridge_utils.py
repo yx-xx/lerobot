@@ -6,10 +6,15 @@ import pytest
 
 from franka_ros2_bridge.core.command_queue import CommandQueue
 from franka_ros2_bridge.core.math_utils import matrix_to_pose, pose_to_matrix
-from franka_ros2_bridge.core.safety import build_end_pose_command, build_joint_command
+from franka_ros2_bridge.core.safety import (
+    build_end_pose_command,
+    build_gripper_command,
+    build_joint_command,
+)
 from franka_ros2_bridge.core.types import (
     DEFAULT_JOINT_LOWER_LIMITS,
     DEFAULT_JOINT_UPPER_LIMITS,
+    GRIPPER_JOINT_NAME,
     JOINT_NAMES,
     EndPose,
     JointCommand,
@@ -17,8 +22,10 @@ from franka_ros2_bridge.core.types import (
 )
 from franka_ros2_bridge.ros.converters import (
     end_pose_cmd_from_msg,
+    gripper_cmd_from_msg,
     joint_cmd_from_msg,
     to_end_pose_msg,
+    to_gripper_state_msg,
     to_joint_state_msg,
 )
 
@@ -134,6 +141,7 @@ def test_joint_cmd_converters_round_trip() -> None:
     state = RobotState(
         joints=tuple(float(index) for index in range(7)),
         end_pose=EndPose(position=(0.4, 0.0, 0.3), quaternion=(0.0, 0.0, 0.0, 1.0)),
+        gripper_width=0.04,
     )
     joint_msg = SimpleNamespace(header=SimpleNamespace(stamp=None, frame_id=""), name=[], position=[])
     to_joint_state_msg(joint_msg, state, stamp="stamp", frame_id="panda_link0")
@@ -153,3 +161,15 @@ def test_joint_cmd_converters_round_trip() -> None:
     assert frame_id == "panda_link0"
     assert position == pytest.approx(state.end_pose.position)
     assert quaternion == pytest.approx(state.end_pose.quaternion)
+
+    gripper_msg = SimpleNamespace(header=SimpleNamespace(stamp=None, frame_id=""), name=[], position=[])
+    to_gripper_state_msg(gripper_msg, state, stamp="stamp", frame_id="panda_link0")
+    assert gripper_cmd_from_msg(gripper_msg) == pytest.approx(0.04)
+    assert gripper_msg.name == [GRIPPER_JOINT_NAME]
+
+
+def test_build_gripper_command_clips_to_limits() -> None:
+    command = build_gripper_command(0.20, min_width=0.0, max_width=0.08, received_at=1.0)
+    assert command.width == pytest.approx(0.08)
+    with pytest.raises(ValueError, match="finite"):
+        build_gripper_command(float("nan"), min_width=0.0, max_width=0.08, received_at=1.0)

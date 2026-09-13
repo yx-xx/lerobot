@@ -16,7 +16,13 @@ import pytest
 
 from lerobot.robots.franka import FrankaConfig, FrankaRobot
 from lerobot.robots.franka import franka as franka_module
-from lerobot.robots.franka.franka import END_POSE_KEYS, JOINT_NAMES, JOINT_KEYS
+from lerobot.robots.franka.franka import (
+    END_POSE_KEYS,
+    GRIPPER_JOINT_NAME,
+    GRIPPER_KEY,
+    JOINT_KEYS,
+    JOINT_NAMES,
+)
 
 
 class _JointState:
@@ -24,6 +30,13 @@ class _JointState:
         self.header = SimpleNamespace(frame_id="", stamp=None)
         self.name = list(JOINT_NAMES)
         self.position = [float(index) for index in range(7)]
+
+
+class _GripperState:
+    def __init__(self):
+        self.header = SimpleNamespace(frame_id="", stamp=None)
+        self.name = [GRIPPER_JOINT_NAME]
+        self.position = [0.04]
 
 
 class _PoseStamped:
@@ -84,8 +97,11 @@ class _Executor:
         self.node = node
 
     def spin(self):
-        for message_type, _, callback, _ in self.node.subscriptions:
-            callback(message_type())
+        for message_type, topic, callback, _ in self.node.subscriptions:
+            if "gripper_state" in topic:
+                callback(_GripperState())
+            else:
+                callback(message_type())
         self.context.stop.wait()
 
     def shutdown(self):
@@ -144,10 +160,11 @@ def test_connect_observe_and_disconnect(tmp_path, ros_mocks):
     robot.connect()
 
     assert robot.is_connected
-    assert set(robot.observation_features) == {*JOINT_KEYS, *END_POSE_KEYS}
+    assert set(robot.observation_features) == {*JOINT_KEYS, *END_POSE_KEYS, GRIPPER_KEY}
     observation = robot.get_observation()
     assert [observation[key] for key in JOINT_KEYS] == [float(index) for index in range(7)]
     assert [observation[key] for key in END_POSE_KEYS] == [0.4, 0.0, 0.3, 0.0, 0.0, 0.0, 1.0]
+    assert observation[GRIPPER_KEY] == 0.04
 
     context = robot._context
     executor = robot._executor
@@ -164,14 +181,21 @@ def test_joint_action_is_clamped_and_published(tmp_path, ros_mocks):
     robot = _make_robot(tmp_path, max_relative_target=0.05)
     robot.connect()
     action = {key: float(index + 1) for index, key in enumerate(JOINT_KEYS)}
+    action[GRIPPER_KEY] = 0.06
 
     sent = robot.send_action(action)
 
-    assert sent == {key: float(index) + 0.05 for index, key in enumerate(JOINT_KEYS)}
+    assert {key: sent[key] for key in JOINT_KEYS} == {
+        key: float(index) + 0.05 for index, key in enumerate(JOINT_KEYS)
+    }
+    assert sent[GRIPPER_KEY] == 0.06
     publisher = nodes[0].publishers[robot.config.joint_cmd_topic][2]
     message = publisher.messages[-1]
     assert message.name == list(JOINT_NAMES)
-    assert message.position == list(sent.values())
+    assert message.position == [sent[key] for key in JOINT_KEYS]
+    gripper_message = nodes[0].publishers[robot.config.gripper_cmd_topic][2].messages[-1]
+    assert gripper_message.name == [GRIPPER_JOINT_NAME]
+    assert gripper_message.position == [0.06]
     assert message.header.frame_id == robot.config.base_frame
     assert message.header.stamp == "stamp"
     robot.disconnect()
@@ -186,7 +210,7 @@ def test_cartesian_action_is_limited_and_published(tmp_path, ros_mocks):
         max_relative_rotation=0.2,
     )
     robot.connect()
-    assert set(robot.action_features) == set(END_POSE_KEYS)
+    assert set(robot.action_features) == {*END_POSE_KEYS, GRIPPER_KEY}
 
     action = {
         "end_pose.x": 0.7,
@@ -196,6 +220,7 @@ def test_cartesian_action_is_limited_and_published(tmp_path, ros_mocks):
         "end_pose.qy": 0.0,
         "end_pose.qz": 1.0,
         "end_pose.qw": 0.0,
+        GRIPPER_KEY: 0.09,
     }
     sent = robot.send_action(action)
 
@@ -204,6 +229,7 @@ def test_cartesian_action_is_limited_and_published(tmp_path, ros_mocks):
         (0.0, 0.0, 0.0, 1.0),
         tuple(sent[key] for key in END_POSE_KEYS[3:]),
     ) == pytest.approx(0.2)
+    assert sent[GRIPPER_KEY] == 0.08
     publisher = nodes[0].publishers[robot.config.end_pose_cmd_topic][2]
     message = publisher.messages[-1]
     assert message.header.frame_id == robot.config.base_frame
@@ -216,7 +242,7 @@ def test_action_validation(tmp_path, ros_mocks):
     robot.connect()
     with pytest.raises(ValueError, match="exactly"):
         robot.send_action({"end_pose.x": 0.0})
-    invalid = dict.fromkeys(END_POSE_KEYS, 0.0)
+    invalid = dict.fromkeys((*END_POSE_KEYS, GRIPPER_KEY), 0.0)
     invalid["end_pose.qw"] = 2.0
     with pytest.raises(ValueError, match="normalized"):
         robot.send_action(invalid)

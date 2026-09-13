@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from franka_ros2_bridge.core.types import JOINT_NAMES, RobotState
+from franka_ros2_bridge.core.types import GRIPPER_JOINT_NAME, JOINT_NAMES, RobotState
 
 
 def joint_cmd_from_msg(message: Any) -> tuple[list[str], list[float]]:
@@ -37,6 +37,22 @@ def to_joint_state_msg(message: Any, state: RobotState, *, stamp: Any, frame_id:
     message.header.frame_id = frame_id
     message.name = list(JOINT_NAMES)
     message.position = list(state.joints)
+    return message
+
+
+def gripper_cmd_from_msg(message: Any) -> float:
+    names = list(message.name)
+    positions = [float(value) for value in message.position]
+    if names != [GRIPPER_JOINT_NAME] or len(positions) != 1:
+        raise ValueError(f"gripper_cmd name must be exactly [{GRIPPER_JOINT_NAME!r}]")
+    return positions[0]
+
+
+def to_gripper_state_msg(message: Any, state: RobotState, *, stamp: Any, frame_id: str) -> Any:
+    message.header.stamp = stamp
+    message.header.frame_id = frame_id
+    message.name = [GRIPPER_JOINT_NAME]
+    message.position = [float(state.gripper_width)]
     return message
 
 

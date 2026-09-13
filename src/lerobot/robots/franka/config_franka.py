@@ -32,6 +32,10 @@ class FrankaConfig(RobotConfig):
     end_pose_topic: str = "/franka/end_pose"
     joint_cmd_topic: str = "/franka/joint_cmd"
     end_pose_cmd_topic: str = "/franka/end_pose_cmd"
+    gripper_state_topic: str = "/franka/gripper_state"
+    gripper_cmd_topic: str = "/franka/gripper_cmd"
+    gripper_min: float = 0.0
+    gripper_max: float = 0.08
     connect_timeout_s: float = 5.0
     state_timeout_s: float = 1.0
     qos_depth: int = 10
@@ -52,6 +56,8 @@ class FrankaConfig(RobotConfig):
             "end_pose_topic": self.end_pose_topic,
             "joint_cmd_topic": self.joint_cmd_topic,
             "end_pose_cmd_topic": self.end_pose_cmd_topic,
+            "gripper_state_topic": self.gripper_state_topic,
+            "gripper_cmd_topic": self.gripper_cmd_topic,
             "base_frame": self.base_frame,
         }
         for name, value in non_empty_strings.items():
@@ -91,3 +97,18 @@ class FrankaConfig(RobotConfig):
                 raise ValueError("max_relative_target limits must be finite positive numbers.")
             if not isinstance(self.max_relative_target, dict):
                 self.max_relative_target = float(self.max_relative_target)
+
+        if (
+            not isinstance(self.gripper_min, (int, float))
+            or isinstance(self.gripper_min, bool)
+            or not math.isfinite(self.gripper_min)
+            or self.gripper_min < 0
+        ):
+            raise ValueError("gripper_min must be a finite non-negative number.")
+        if (
+            not isinstance(self.gripper_max, (int, float))
+            or isinstance(self.gripper_max, bool)
+            or not math.isfinite(self.gripper_max)
+            or self.gripper_max < self.gripper_min
+        ):
+            raise ValueError("gripper_max must be finite and at least gripper_min.")

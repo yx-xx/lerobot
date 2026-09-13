@@ -136,6 +136,9 @@ src/lerobot/robots/utils.py
 src/lerobot/robots/bi_so100_follower/__init__.py
 src/lerobot/robots/bi_so100_follower/bi_so100_follower.py
 src/lerobot/robots/bi_so100_follower/config_bi_so100_follower.py
+src/lerobot/robots/franka/__init__.py
+src/lerobot/robots/franka/config_franka.py
+src/lerobot/robots/franka/franka.py
 src/lerobot/robots/hope_jr/__init__.py
 src/lerobot/robots/hope_jr/config_hope_jr.py
 src/lerobot/robots/hope_jr/hope_jr_arm.py
@@ -210,6 +213,9 @@ src/lerobot/teleoperators/phone/__init__.py
 src/lerobot/teleoperators/phone/config_phone.py
 src/lerobot/teleoperators/phone/phone_processor.py
 src/lerobot/teleoperators/phone/teleop_phone.py
+src/lerobot/teleoperators/piper_x/__init__.py
+src/lerobot/teleoperators/piper_x/configuration_piper_x.py
+src/lerobot/teleoperators/piper_x/piper_x.py
 src/lerobot/teleoperators/reachy2_teleoperator/__init__.py
 src/lerobot/teleoperators/reachy2_teleoperator/config_reachy2_teleoperator.py
 src/lerobot/teleoperators/reachy2_teleoperator/reachy2_teleoperator.py

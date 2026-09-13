@@ -26,3 +26,13 @@ python examples/piper_x/read.py
 ```bash
 python examples/piper_x/teleoperate.py
 ```
+
+## 遥操作远程 Franka
+
+控制机先跑 `ros2/franka_ros2_bridge`。本机 source ROS 2 Humble、设置相同的 `ROS_DOMAIN_ID`，再：
+
+```bash
+python examples/piper_x_to_franka/teleoperate.py
+```
+
+Piper 末端位姿直接映射到 Franka 末端（毫米→米，欧拉角→四元数），示教器映射到 `gripper.pos`。不是增量控制。方向不对就改脚本里的 `POSITION_AXES`，工作空间对不齐就改 `POSITION_OFFSET`。

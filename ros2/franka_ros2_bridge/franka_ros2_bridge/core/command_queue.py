@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import time
 
-from franka_ros2_bridge.core.types import EndPoseCommand, JointCommand, MotionCommand
+from franka_ros2_bridge.core.types import EndPoseCommand, GripperCommand, JointCommand, MotionCommand
 
 
 class CommandQueue:
@@ -17,13 +17,20 @@ class CommandQueue:
         self._timeout_sec = timeout_sec
         self._lock = threading.Lock()
         self._event = threading.Event()
+        self._gripper_event = threading.Event()
         self._latest: MotionCommand | None = None
+        self._latest_gripper: GripperCommand | None = None
 
     def push_joint(self, command: JointCommand) -> None:
         self._push(MotionCommand(mode="joint", joint=command))
 
     def push_end_pose(self, command: EndPoseCommand) -> None:
         self._push(MotionCommand(mode="cartesian", end_pose=command))
+
+    def push_gripper(self, command: GripperCommand) -> None:
+        with self._lock:
+            self._latest_gripper = command
+            self._gripper_event.set()
 
     def _push(self, command: MotionCommand) -> None:
         with self._lock:
@@ -40,8 +47,21 @@ class CommandQueue:
                 self._event.clear()
             return command
 
+    def take_gripper(self, wait_timeout_sec: float = 0.1) -> GripperCommand | None:
+        self._gripper_event.wait(timeout=wait_timeout_sec)
+        with self._lock:
+            command = self._latest_gripper
+            self._latest_gripper = None
+            if command is None:
+                self._gripper_event.clear()
+            return command
+
     def is_stale(self, command: MotionCommand) -> bool:
+        return time.monotonic() - command.received_at > self._timeout_sec
+
+    def is_gripper_stale(self, command: GripperCommand) -> bool:
         return time.monotonic() - command.received_at > self._timeout_sec
 
     def wake(self) -> None:
         self._event.set()
+        self._gripper_event.set()

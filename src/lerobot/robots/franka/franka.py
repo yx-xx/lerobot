@@ -48,6 +48,8 @@ except ImportError as error:
 JOINT_NAMES = tuple(f"panda_joint{i}" for i in range(1, 8))
 JOINT_KEYS = tuple(f"j{i}.pos" for i in range(1, 8))
 END_POSE_KEYS = ("end_pose.x", "end_pose.y", "end_pose.z", "end_pose.qx", "end_pose.qy", "end_pose.qz", "end_pose.qw")
+GRIPPER_KEY = "gripper.pos"
+GRIPPER_JOINT_NAME = "panda_finger"
 
 
 class FrankaRobot(Robot):
@@ -64,14 +66,17 @@ class FrankaRobot(Robot):
         self._lock = threading.Lock()
         self._joint_positions: dict[str, float] | None = None
         self._end_pose: tuple[float, ...] | None = None
+        self._gripper_width: float | None = None
         self._joint_state_time: float | None = None
         self._end_pose_time: float | None = None
+        self._gripper_state_time: float | None = None
         self._context = None
         self._node = None
         self._executor = None
         self._executor_thread: threading.Thread | None = None
         self._joint_publisher = None
         self._end_pose_publisher = None
+        self._gripper_publisher = None
         self.cameras = make_cameras_from_configs(config.cameras)
 
     @property
@@ -83,6 +88,10 @@ class FrankaRobot(Robot):
         return dict.fromkeys(END_POSE_KEYS, float)
 
     @property
+    def _gripper_ft(self) -> dict[str, type]:
+        return {GRIPPER_KEY: float}
+
+    @property
     def _cameras_ft(self) -> dict[str, tuple]:
         return {
             cam: (self.config.cameras[cam].height, self.config.cameras[cam].width, 3)
@@ -91,11 +100,12 @@ class FrankaRobot(Robot):
 
     @cached_property
     def observation_features(self) -> dict[str, type | tuple]:
-        return {**self._motors_ft, **self._end_pose_ft, **self._cameras_ft}
+        return {**self._motors_ft, **self._end_pose_ft, **self._gripper_ft, **self._cameras_ft}
 
     @cached_property
     def action_features(self) -> dict[str, type]:
-        return self._motors_ft if self.config.control_mode == "joint" else self._end_pose_ft
+        motion = self._motors_ft if self.config.control_mode == "joint" else self._end_pose_ft
+        return {**motion, **self._gripper_ft}
 
     @property
     def is_connected(self) -> bool:
@@ -131,6 +141,15 @@ class FrankaRobot(Robot):
             )
             self._end_pose_publisher = self._node.create_publisher(
                 PoseStamped, self.config.end_pose_cmd_topic, self.config.qos_depth
+            )
+            self._node.create_subscription(
+                JointState,
+                self.config.gripper_state_topic,
+                self._gripper_state_callback,
+                self.config.qos_depth,
+            )
+            self._gripper_publisher = self._node.create_publisher(
+                JointState, self.config.gripper_cmd_topic, self.config.qos_depth
             )
             self._executor = SingleThreadedExecutor(context=self._context)
             self._executor.add_node(self._node)
@@ -168,20 +187,25 @@ class FrankaRobot(Robot):
             if (
                 self._joint_positions is None
                 or self._end_pose is None
+                or self._gripper_width is None
                 or self._joint_state_time is None
                 or self._end_pose_time is None
+                or self._gripper_state_time is None
             ):
                 raise RuntimeError("Franka state is incomplete.")
             if now - self._joint_state_time > self.config.state_timeout_s:
                 raise RuntimeError("Franka joint state is stale.")
             if now - self._end_pose_time > self.config.state_timeout_s:
                 raise RuntimeError("Franka end-effector pose is stale.")
+            if now - self._gripper_state_time > self.config.state_timeout_s:
+                raise RuntimeError("Franka gripper state is stale.")
             observation = {
                 **{
                     key: self._joint_positions[name]
                     for key, name in zip(JOINT_KEYS, JOINT_NAMES, strict=True)
                 },
                 **dict(zip(END_POSE_KEYS, self._end_pose, strict=True)),
+                GRIPPER_KEY: self._gripper_width,
             }
 
         for camera_key, camera in self.cameras.items():
@@ -200,7 +224,8 @@ class FrankaRobot(Robot):
 
     def send_joint_action(self, action: dict[str, float]) -> dict[str, float]:
         self._require_connected()
-        values = self._validate_action(action, JOINT_KEYS)
+        values = self._validate_action(action, (*JOINT_KEYS, GRIPPER_KEY))
+        gripper_width = self._clip_gripper(values[GRIPPER_KEY])
         with self._lock:
             if self._joint_positions is None or self._joint_state_time is None:
                 raise RuntimeError("Franka joint state is unavailable.")
@@ -211,7 +236,7 @@ class FrankaRobot(Robot):
                 for i, name in enumerate(JOINT_NAMES, start=1)
             }
 
-        goals = {key.removesuffix(".pos"): value for key, value in values.items()}
+        goals = {key.removesuffix(".pos"): values[key] for key in JOINT_KEYS}
         if self.config.max_relative_target is not None:
             goals = ensure_safe_goal_position(
                 {name: (goals[name], present[name]) for name in goals},
@@ -224,11 +249,13 @@ class FrankaRobot(Robot):
         message.name = list(JOINT_NAMES)
         message.position = [goals[f"j{i}"] for i in range(1, 8)]
         self._joint_publisher.publish(message)
-        return {f"j{i}.pos": message.position[i - 1] for i in range(1, 8)}
+        self._publish_gripper(gripper_width)
+        return {**{f"j{i}.pos": message.position[i - 1] for i in range(1, 8)}, GRIPPER_KEY: gripper_width}
 
     def send_end_pose(self, action: dict[str, float]) -> dict[str, float]:
         self._require_connected()
-        values = self._validate_action(action, END_POSE_KEYS)
+        values = self._validate_action(action, (*END_POSE_KEYS, GRIPPER_KEY))
+        gripper_width = self._clip_gripper(values[GRIPPER_KEY])
         target_position = tuple(values[key] for key in END_POSE_KEYS[:3])
         target_quaternion = tuple(values[key] for key in END_POSE_KEYS[3:])
         norm = math.sqrt(sum(value * value for value in target_quaternion))
@@ -269,8 +296,9 @@ class FrankaRobot(Robot):
             message.pose.orientation.w,
         ) = target_quaternion
         self._end_pose_publisher.publish(message)
+        self._publish_gripper(gripper_width)
         sent = (*target_position, *target_quaternion)
-        return dict(zip(END_POSE_KEYS, sent, strict=True))
+        return {**dict(zip(END_POSE_KEYS, sent, strict=True)), GRIPPER_KEY: gripper_width}
 
     def _joint_state_callback(self, message: Any) -> None:
         if len(message.name) != len(message.position):
@@ -310,15 +338,30 @@ class FrankaRobot(Robot):
             self._end_pose = (*map(float, values[:3]), *quaternion)
             self._end_pose_time = time.monotonic()
 
+    def _gripper_state_callback(self, message: Any) -> None:
+        if len(message.name) != len(message.position):
+            return
+        positions = dict(zip(message.name, message.position, strict=True))
+        width = positions.get(GRIPPER_JOINT_NAME)
+        if width is None or not math.isfinite(width):
+            return
+        with self._lock:
+            self._gripper_width = float(width)
+            self._gripper_state_time = time.monotonic()
+
     def _wait_for_initial_state(self) -> None:
         deadline = time.monotonic() + self.config.connect_timeout_s
         while time.monotonic() < deadline:
             with self._lock:
-                if self._joint_positions is not None and self._end_pose is not None:
+                if (
+                    self._joint_positions is not None
+                    and self._end_pose is not None
+                    and self._gripper_width is not None
+                ):
                     return
             time.sleep(0.01)
         raise RuntimeError(
-            "Timed out waiting for complete Franka joint state and end-effector pose."
+            "Timed out waiting for complete Franka joint state, end-effector pose, and gripper."
         )
 
     def _cleanup(self) -> None:
@@ -352,11 +395,25 @@ class FrankaRobot(Robot):
         self._context = None
         self._joint_publisher = None
         self._end_pose_publisher = None
+        self._gripper_publisher = None
         with self._lock:
             self._joint_positions = None
             self._end_pose = None
+            self._gripper_width = None
             self._joint_state_time = None
             self._end_pose_time = None
+            self._gripper_state_time = None
+
+    def _clip_gripper(self, width: float) -> float:
+        return min(max(float(width), self.config.gripper_min), self.config.gripper_max)
+
+    def _publish_gripper(self, width: float) -> None:
+        message = JointState()
+        message.header.stamp = self._node.get_clock().now().to_msg()
+        message.header.frame_id = self.config.base_frame
+        message.name = [GRIPPER_JOINT_NAME]
+        message.position = [width]
+        self._gripper_publisher.publish(message)
 
     def _require_connected(self) -> None:
         if not self.is_connected:

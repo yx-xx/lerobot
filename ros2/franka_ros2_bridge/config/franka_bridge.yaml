@@ -15,3 +15,8 @@ franka_bridge:
     joint_upper_limits: [2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973]
     workspace_min: [0.20, -0.60, 0.02]
     workspace_max: [0.80, 0.60, 0.90]
+    gripper_state_topic: "/franka/gripper_state"
+    gripper_cmd_topic: "/franka/gripper_cmd"
+    gripper_min: 0.0
+    gripper_max: 0.08
+    gripper_speed: 0.04

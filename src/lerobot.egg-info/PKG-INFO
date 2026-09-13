@@ -74,6 +74,9 @@ Requires-Dist: pyrealsense2-macosx>=2.54; sys_platform == "darwin" and extra == 
 Provides-Extra: phone
 Requires-Dist: hebi-py>=2.8.0; extra == "phone"
 Requires-Dist: teleop>=0.1.0; extra == "phone"
+Provides-Extra: piper
+Requires-Dist: python-can>=3.3.4; extra == "piper"
+Requires-Dist: typing-extensions>=3.7.4.3; extra == "piper"
 Provides-Extra: pi0
 Requires-Dist: lerobot[transformers-dep]; extra == "pi0"
 Provides-Extra: smolvla
@@ -131,6 +134,7 @@ Requires-Dist: lerobot[aloha]; extra == "all"
 Requires-Dist: lerobot[pusht]; extra == "all"
 Requires-Dist: lerobot[xarm]; extra == "all"
 Requires-Dist: lerobot[phone]; extra == "all"
+Requires-Dist: lerobot[piper]; extra == "all"
 Requires-Dist: lerobot[libero]; extra == "all"
 Dynamic: license-file
 
