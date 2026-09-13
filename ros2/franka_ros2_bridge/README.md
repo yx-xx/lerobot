@@ -8,29 +8,13 @@
 每个新终端都要先执行下面两行，再启动节点。不要写进 `~/.bashrc`，以免污染其它终端。
 
 ```bash
+
 source /opt/ros/humble/setup.bash
 export ROS_DOMAIN_ID=23
-```
-
-工作空间 overlay（包已经 `colcon build` 过之后）：
-
-```bash
 source ~/franka_ws/install/setup.bash
-```
-
-启动桥接节点（默认读取包内 `config/franka_bridge.yaml`）：
-
-```bash
 ros2 launch franka_ros2_bridge franka_bridge.launch.py
+
 ```
-
-使用自定义配置：
-
-```bash
-ros2 launch franka_ros2_bridge franka_bridge.launch.py \
-  config_file:=/absolute/path/to/franka_bridge.yaml
-```
-
 确认状态话题在发：
 
 ```bash

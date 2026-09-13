@@ -15,6 +15,34 @@ from franka_ros2_bridge.core.types import (
     RobotState,
 )
 
+_JOINT_GETTERS = ("current_joint_positions", "currentJointPositions")
+
+
+def joints_from_frankx_robot(robot: Any) -> tuple[float, ...]:
+    """Read 7 joint angles. Prefer current_* APIs; some frankx builds only have read_once().q."""
+    for name in _JOINT_GETTERS:
+        getter = getattr(robot, name, None)
+        if callable(getter):
+            return tuple(float(value) for value in getter())
+
+    get_state = getattr(robot, "get_state", None)
+    if callable(get_state):
+        joints = getattr(get_state(), "q", None)
+        if joints is not None:
+            return tuple(float(value) for value in joints)
+
+    # 你现场的 frankx 没有 current_joint_positions，关节只能从这里拿。
+    read_once = getattr(robot, "read_once", None)
+    if callable(read_once):
+        joints = getattr(read_once(), "q", None)
+        if joints is not None:
+            return tuple(float(value) for value in joints)
+
+    raise RuntimeError(
+        "this frankx build exposes neither current_joint_positions, "
+        "currentJointPositions, get_state, nor read_once"
+    )
+
 
 class FrankxController:
     """Wrap frankx so the ROS node never imports it directly."""
@@ -189,10 +217,7 @@ class FrankxController:
         return self._robot
 
     def _read_joints(self, robot: Any) -> tuple[float, ...]:
-        getter = getattr(robot, "current_joint_positions", None)
-        if getter is None:
-            raise RuntimeError("frankx Robot.current_joint_positions() is unavailable")
-        return tuple(float(value) for value in getter())
+        return joints_from_frankx_robot(robot)
 
     def _read_pose(self, robot: Any) -> Any:
         return robot.current_pose()

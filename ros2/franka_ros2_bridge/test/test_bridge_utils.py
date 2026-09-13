@@ -20,6 +20,7 @@ from franka_ros2_bridge.core.types import (
     JointCommand,
     RobotState,
 )
+from franka_ros2_bridge.control.frankx_controller import joints_from_frankx_robot
 from franka_ros2_bridge.ros.converters import (
     end_pose_cmd_from_msg,
     gripper_cmd_from_msg,
@@ -166,6 +167,19 @@ def test_joint_cmd_converters_round_trip() -> None:
     to_gripper_state_msg(gripper_msg, state, stamp="stamp", frame_id="panda_link0")
     assert gripper_cmd_from_msg(gripper_msg) == pytest.approx(0.04)
     assert gripper_msg.name == [GRIPPER_JOINT_NAME]
+
+
+def test_joints_from_frankx_prefer_current_joint_positions() -> None:
+    robot = SimpleNamespace(
+        current_joint_positions=lambda: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+        read_once=lambda: SimpleNamespace(q=[9.0] * 7),
+    )
+    assert joints_from_frankx_robot(robot) == (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7)
+
+
+def test_joints_from_frankx_falls_back_to_read_once_q() -> None:
+    robot = SimpleNamespace(read_once=lambda: SimpleNamespace(q=list(range(7))))
+    assert joints_from_frankx_robot(robot) == tuple(float(value) for value in range(7))
 
 
 def test_build_gripper_command_clips_to_limits() -> None:
