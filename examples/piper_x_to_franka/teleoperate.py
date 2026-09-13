@@ -57,12 +57,12 @@ PIPER_Z_MM = (120.0, 500.0)
 
 # 标定：Franka 末端工作空间，单位米，相对 panda_link0。
 FRANKA_X_M = (0.30, 0.60)
-FRANKA_Y_M = (-0.20, 0.20)
-FRANKA_Z_M = (0.15, 0.45)
+FRANKA_Y_M = (-0.35, 0.35)
+FRANKA_Z_M = (0.17, 0.60)
 
 # 标定：示教器开口（毫米）→ Franka 夹爪开口（米）。
 PENDANT_MM = (51.0, 98.0)
-GRIPPER_M = (0.0, 0.08)
+GRIPPER_M = (0.0045, 0.0846)
 
 
 def main() -> None:
