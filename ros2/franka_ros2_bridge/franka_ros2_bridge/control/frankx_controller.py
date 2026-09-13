@@ -164,6 +164,9 @@ class FrankxController:
             thread = robot.move_async(frankx.JointMotion(list(command.positions)))
             self._arm_motion_thread = thread
 
+    def set_end_pose_target(self, command: EndPoseCommand) -> None:
+        self.start_end_pose(command)
+
     def start_end_pose(self, command: EndPoseCommand) -> None:
         self.stop_arm()
         with self._lock:

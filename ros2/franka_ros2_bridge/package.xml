@@ -2,7 +2,7 @@
 <package format="3">
   <name>franka_ros2_bridge</name>
   <version>0.1.0</version>
-  <description>Reusable ROS 2 bridge for Franka robots using frankx.</description>
+  <description>Reusable ROS 2 bridge for Franka robots using a 1 kHz libfranka cartesian stream.</description>
   <maintainer email="maintainer@example.com">Franka ROS 2 Bridge Maintainers</maintainer>
   <license>Apache-2.0</license>
 

@@ -7,6 +7,9 @@ franka_bridge:
     end_pose_cmd_topic: "/franka/end_pose_cmd"
     base_frame: "panda_link0"
     publish_rate_hz: 50.0
+    cartesian_mode: stream
+    max_linear_velocity: 0.35
+    max_angular_velocity: 1.2
     velocity_rel: 0.25
     acceleration_rel: 0.20
     jerk_rel: 0.20

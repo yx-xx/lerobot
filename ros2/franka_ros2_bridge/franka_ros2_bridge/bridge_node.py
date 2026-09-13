@@ -21,6 +21,7 @@ from franka_ros2_bridge.core.types import (
     JOINT_NAMES,
 )
 from franka_ros2_bridge.control.frankx_controller import FrankxController
+from franka_ros2_bridge.control.stream_controller import StreamController
 from franka_ros2_bridge.ros.converters import (
     end_pose_cmd_from_msg,
     joint_cmd_from_msg,
@@ -76,6 +77,9 @@ class FrankaBridgeNode(Node):
         self.declare_parameter("gripper_min", DEFAULT_GRIPPER_MIN)
         self.declare_parameter("gripper_max", DEFAULT_GRIPPER_MAX)
         self.declare_parameter("gripper_speed", 0.04)
+        self.declare_parameter("cartesian_mode", "stream")
+        self.declare_parameter("max_linear_velocity", 0.35)
+        self.declare_parameter("max_angular_velocity", 1.2)
 
         self.base_frame = str(self.get_parameter("base_frame").value)
         self.command_timeout = float(self.get_parameter("command_timeout_sec").value)
@@ -94,6 +98,9 @@ class FrankaBridgeNode(Node):
         acceleration_rel = float(self.get_parameter("acceleration_rel").value)
         jerk_rel = float(self.get_parameter("jerk_rel").value)
         gripper_speed = float(self.get_parameter("gripper_speed").value)
+        cartesian_mode = str(self.get_parameter("cartesian_mode").value).strip().lower()
+        max_linear_velocity = float(self.get_parameter("max_linear_velocity").value)
+        max_angular_velocity = float(self.get_parameter("max_angular_velocity").value)
 
         if rate <= 0.0 or self.command_timeout <= 0.0:
             raise ValueError("publish_rate_hz and command_timeout_sec must be positive")
@@ -125,16 +132,31 @@ class FrankaBridgeNode(Node):
         ):
             raise ValueError("gripper_min/max must be finite and increasing")
 
-        self._controller = FrankxController(
-            str(self.get_parameter("robot_ip").value),
-            velocity_rel=velocity_rel,
-            acceleration_rel=acceleration_rel,
-            jerk_rel=jerk_rel,
-            gripper_speed=gripper_speed,
-        )
+        robot_ip = str(self.get_parameter("robot_ip").value)
+        if cartesian_mode == "stream":
+            self._streaming = True
+            self._controller = StreamController(
+                robot_ip,
+                max_linear_velocity=max_linear_velocity,
+                max_angular_velocity=max_angular_velocity,
+                gripper_speed=gripper_speed,
+            )
+        elif cartesian_mode == "ptp":
+            self._streaming = False
+            self._controller = FrankxController(
+                robot_ip,
+                velocity_rel=velocity_rel,
+                acceleration_rel=acceleration_rel,
+                jerk_rel=jerk_rel,
+                gripper_speed=gripper_speed,
+            )
+        else:
+            raise ValueError("cartesian_mode must be 'stream' or 'ptp'")
         self._last_published_state = None
         self._controller.connect()
         self._last_published_state = self._controller.read_state()
+        if self._streaming:
+            self.get_logger().info("Cartesian pose stream is running at 1 kHz")
         self._commands = CommandQueue(self.command_timeout)
         self._stop_event = threading.Event()
 
@@ -222,39 +244,28 @@ class FrankaBridgeNode(Node):
         self._commands.push_gripper(command)
 
     def _command_worker(self) -> None:
-        # 遥操作要跟最新目标：运动中若来了新命令，停掉当前点到点，立刻改去新点。
-        # 以前会等 LinearMotion 走完再取下一条，看起来就会很卡。
         while not self._stop_event.is_set():
-            command = self._commands.take(wait_timeout_sec=0.05)
-            while command is not None and not self._stop_event.is_set():
+            command = self._commands.take(wait_timeout_sec=0.02)
+            if command is None:
+                continue
+            if command.mode == "joint":
+                if self._streaming:
+                    self.get_logger().warning("Ignoring joint_cmd while cartesian stream is running")
+                    continue
                 if self._commands.is_stale(command):
-                    self.get_logger().warning(f"Dropped stale {command.mode} command")
-                    command = self._commands.take(wait_timeout_sec=0.0)
+                    self.get_logger().warning("Dropped stale joint command")
                     continue
                 try:
-                    if command.mode == "joint":
-                        assert command.joint is not None
-                        self._controller.start_joint(command.joint)
-                    else:
-                        assert command.end_pose is not None
-                        self._controller.start_end_pose(command.end_pose)
+                    assert command.joint is not None
+                    self._controller.start_joint(command.joint)
                 except Exception as exc:
                     self.get_logger().error(f"Motion failed: {exc}")
-                    command = None
-                    break
-                command = self._wait_for_newer_command()
-
-    def _wait_for_newer_command(self) -> Any:
-        while self._controller.arm_is_moving() and not self._stop_event.is_set():
-            newer = self._commands.take(wait_timeout_sec=0.02)
-            if newer is None:
                 continue
-            if self._commands.is_stale(newer):
-                self.get_logger().warning(f"Dropped stale {newer.mode} command")
-                continue
-            self._controller.stop_arm()
-            return newer
-        return None
+            assert command.end_pose is not None
+            try:
+                self._controller.set_end_pose_target(command.end_pose)
+            except Exception as exc:
+                self.get_logger().error(f"Failed to update cartesian target: {exc}")
 
     def _gripper_worker_loop(self) -> None:
         while not self._stop_event.is_set():

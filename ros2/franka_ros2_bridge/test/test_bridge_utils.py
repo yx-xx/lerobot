@@ -22,6 +22,7 @@ from franka_ros2_bridge.core.types import (
     RobotState,
 )
 from franka_ros2_bridge.control.frankx_controller import joints_from_frankx_robot
+from franka_ros2_bridge.control.stream_controller import StreamController
 from franka_ros2_bridge.ros.converters import (
     end_pose_cmd_from_msg,
     gripper_cmd_from_msg,
@@ -183,6 +184,13 @@ def test_joint_cmd_converters_round_trip() -> None:
     to_gripper_state_msg(gripper_msg, state, stamp="stamp", frame_id="panda_link0")
     assert gripper_cmd_from_msg(gripper_msg) == pytest.approx(0.04)
     assert gripper_msg.name == [GRIPPER_JOINT_NAME]
+
+
+def test_stream_controller_rejects_bad_limits() -> None:
+    with pytest.raises(ValueError):
+        StreamController("172.16.0.2", max_linear_velocity=0.0)
+    with pytest.raises(ValueError):
+        StreamController("172.16.0.2", max_angular_velocity=-1.0)
 
 
 def test_joints_from_frankx_prefer_current_joint_positions() -> None:
