@@ -8,7 +8,7 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -45,26 +45,51 @@ FRANKA_END_POSE_KEYS = (
 )
 TEACHING_PENDANT_KEY = "teaching_pendant.pos"
 GRIPPER_KEY = "gripper.pos"
-_AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
+
+AxisRange = tuple[float, float]
+Box3 = tuple[AxisRange, AxisRange, AxisRange]
 
 
-def _axis_alignment_matrix(axes: tuple[str, str, str]) -> np.ndarray:
-    """Build R_align such that ``p_franka = R_align @ p_piper``."""
-    matrix = np.zeros((3, 3), dtype=float)
-    names: list[str] = []
-    for row, spec in enumerate(axes):
-        token = spec.strip().lower()
-        if not token:
-            raise ValueError("position_axes entries must not be empty")
-        sign = -1.0 if token.startswith("-") else 1.0
-        name = token[1:] if token[0] in "+-" else token
-        if name not in _AXIS_INDEX:
-            raise ValueError(f"position_axes must use x/y/z with optional signs, got {spec!r}")
-        matrix[row, _AXIS_INDEX[name]] = sign
-        names.append(name)
-    if set(names) != set(_AXIS_INDEX):
-        raise ValueError("position_axes must be a signed permutation of x, y, z")
-    return matrix
+def _finite_pair(bounds: AxisRange, name: str) -> AxisRange:
+    if len(bounds) != 2:
+        raise ValueError(f"{name} must be (min, max)")
+    start, end = bounds
+    if (
+        isinstance(start, bool)
+        or isinstance(end, bool)
+        or not isinstance(start, (int, float))
+        or not isinstance(end, (int, float))
+        or not np.isfinite(start)
+        or not np.isfinite(end)
+    ):
+        raise ValueError(f"{name} bounds must be finite numbers")
+    if start == end:
+        raise ValueError(f"{name} bounds must not be identical")
+    return (float(start), float(end))
+
+
+def _validate_box(box: Box3, name: str) -> Box3:
+    if len(box) != 3:
+        raise ValueError(f"{name} must contain x, y, z ranges")
+    return (
+        _finite_pair(box[0], f"{name}.x"),
+        _finite_pair(box[1], f"{name}.y"),
+        _finite_pair(box[2], f"{name}.z"),
+    )
+
+
+def map_calibrated_range(value: float, source: AxisRange, destination: AxisRange) -> float:
+    """Map ``source[0] -> destination[0]`` and ``source[1] -> destination[1]``.
+
+    The input is clipped to the source interval. Reversing a destination pair
+    inverts that axis.
+    """
+    source_start, source_end = source
+    dest_start, dest_end = destination
+    low, high = (source_start, source_end) if source_start <= source_end else (source_end, source_start)
+    clipped = min(max(float(value), low), high)
+    fraction = (clipped - source_start) / (source_end - source_start)
+    return dest_start + fraction * (dest_end - dest_start)
 
 
 def _rpy_zyx_to_rotation(roll: float, pitch: float, yaw: float) -> Rotation:
@@ -89,75 +114,44 @@ def _require_finite(values: dict[str, float], keys: tuple[str, ...], label: str)
         raise ValueError(f"{label} values must be finite numbers")
 
 
-def _piper_pose_from_action(action: RobotAction) -> tuple[np.ndarray, Rotation]:
-    _require_finite(action, PIPER_ENDPOSE_KEYS, "Piper-X action")
-    position_m = (
-        np.array(
-            [action["endpose.x"], action["endpose.y"], action["endpose.z"]],
-            dtype=float,
-        )
-        / 1000.0
-    )
-    rotation = _rpy_zyx_to_rotation(
-        roll=np.deg2rad(float(action["endpose.roll"])),
-        pitch=np.deg2rad(float(action["endpose.pitch"])),
-        yaw=np.deg2rad(float(action["endpose.yaw"])),
-    )
-    return position_m, rotation
-
-
 @ProcessorStepRegistry.register("map_piper_x_endpose_to_franka_action")
 @dataclass
 class MapPiperXEndposeToFrankaAction(RobotActionProcessorStep):
     """Map Piper-X end-effector space onto Franka end-effector space.
 
-    Each Piper pose is converted and sent as an absolute Franka cartesian
-    target: millimetres to metres, ZYX RPY to an XYZW quaternion, then
-
-        p_franka = R_align @ (position_scale * p_piper) + position_offset
-        R_franka = R_align @ R_piper
-
-    There is no first-frame latch and no incremental command.
-    ``teaching_pendant.pos`` (millimetres) maps to ``gripper.pos`` (metres).
+    Position is an axis-aligned cuboid map: each Piper XYZ millimetre range is
+    linearly mapped onto the matching Franka XYZ metre range. Teaching pendant
+    millimetres are mapped onto Franka gripper metres the same way. Orientation
+    stays an absolute ZYX RPY to XYZW conversion.
     """
 
-    position_scale: float = 1.0
-    position_axes: tuple[str, str, str] = ("x", "y", "z")
-    position_offset: tuple[float, float, float] = (0.0, 0.0, 0.0)
-    gripper_scale: float = 1.0
-    gripper_offset: float = 0.0
-    gripper_min: float = 0.0
-    gripper_max: float = 0.08
-    _axis_matrix: np.ndarray = field(init=False, repr=False)
-    _offset: np.ndarray = field(init=False, repr=False)
+    piper_xyz_mm: Box3
+    franka_xyz_m: Box3
+    pendant_mm: AxisRange
+    gripper_m: AxisRange
 
     def __post_init__(self) -> None:
-        if not np.isfinite(self.position_scale) or self.position_scale <= 0:
-            raise ValueError("position_scale must be a finite positive number")
-        if len(self.position_offset) != 3 or any(
-            not isinstance(value, (int, float)) or isinstance(value, bool) or not np.isfinite(value)
-            for value in self.position_offset
-        ):
-            raise ValueError("position_offset must be three finite numbers in metres")
-        if not np.isfinite(self.gripper_scale):
-            raise ValueError("gripper_scale must be finite")
-        if not np.isfinite(self.gripper_offset):
-            raise ValueError("gripper_offset must be finite")
-        if (
-            not np.isfinite(self.gripper_min)
-            or not np.isfinite(self.gripper_max)
-            or self.gripper_min < 0
-            or self.gripper_max < self.gripper_min
-        ):
-            raise ValueError("gripper_min/max must be finite and increasing")
-        self._axis_matrix = _axis_alignment_matrix(self.position_axes)
-        self._offset = np.array(self.position_offset, dtype=float)
+        self.piper_xyz_mm = _validate_box(self.piper_xyz_mm, "piper_xyz_mm")
+        self.franka_xyz_m = _validate_box(self.franka_xyz_m, "franka_xyz_m")
+        self.pendant_mm = _finite_pair(self.pendant_mm, "pendant_mm")
+        self.gripper_m = _finite_pair(self.gripper_m, "gripper_m")
 
     def action(self, action: RobotAction) -> RobotAction:
-        piper_pos, piper_rot = _piper_pose_from_action(action)
-        target_pos = self._axis_matrix @ (piper_pos * self.position_scale) + self._offset
-        target_rot = Rotation.from_matrix(self._axis_matrix @ piper_rot.as_matrix())
-        quat = target_rot.as_quat()
+        _require_finite(action, PIPER_ENDPOSE_KEYS, "Piper-X action")
+        target_pos = [
+            map_calibrated_range(
+                float(action[f"endpose.{axis}"]),
+                self.piper_xyz_mm[index],
+                self.franka_xyz_m[index],
+            )
+            for index, axis in enumerate("xyz")
+        ]
+        rotation = _rpy_zyx_to_rotation(
+            roll=np.deg2rad(float(action["endpose.roll"])),
+            pitch=np.deg2rad(float(action["endpose.pitch"])),
+            yaw=np.deg2rad(float(action["endpose.yaw"])),
+        )
+        quat = rotation.as_quat()
         return {
             "end_pose.x": float(target_pos[0]),
             "end_pose.y": float(target_pos[1]),
@@ -171,7 +165,7 @@ class MapPiperXEndposeToFrankaAction(RobotActionProcessorStep):
 
     def _gripper_from_pendant(self, action: RobotAction) -> float:
         if TEACHING_PENDANT_KEY not in action:
-            pendant_mm = 0.0
+            pendant_mm = self.pendant_mm[0]
         else:
             pendant = action[TEACHING_PENDANT_KEY]
             if (
@@ -181,8 +175,7 @@ class MapPiperXEndposeToFrankaAction(RobotActionProcessorStep):
             ):
                 raise ValueError("teaching_pendant.pos must be a finite number")
             pendant_mm = float(pendant)
-        width = pendant_mm / 1000.0 * self.gripper_scale + self.gripper_offset
-        return float(min(max(width, self.gripper_min), self.gripper_max))
+        return float(map_calibrated_range(pendant_mm, self.pendant_mm, self.gripper_m))
 
     def transform_features(
         self, features: dict[PipelineFeatureType, dict[str, PolicyFeature]]
@@ -196,24 +189,18 @@ class MapPiperXEndposeToFrankaAction(RobotActionProcessorStep):
 
 
 def make_piper_x_to_franka_teleop_processor(
-    position_scale: float = 1.0,
-    position_axes: tuple[str, str, str] = ("x", "y", "z"),
-    position_offset: tuple[float, float, float] = (0.0, 0.0, 0.0),
-    gripper_scale: float = 1.0,
-    gripper_offset: float = 0.0,
-    gripper_min: float = 0.0,
-    gripper_max: float = 0.08,
+    piper_xyz_mm: Box3,
+    franka_xyz_m: Box3,
+    pendant_mm: AxisRange,
+    gripper_m: AxisRange,
 ) -> RobotProcessorPipeline[tuple[RobotAction, RobotObservation], RobotAction]:
     return RobotProcessorPipeline[tuple[RobotAction, RobotObservation], RobotAction](
         steps=[
             MapPiperXEndposeToFrankaAction(
-                position_scale=position_scale,
-                position_axes=position_axes,
-                position_offset=position_offset,
-                gripper_scale=gripper_scale,
-                gripper_offset=gripper_offset,
-                gripper_min=gripper_min,
-                gripper_max=gripper_max,
+                piper_xyz_mm=piper_xyz_mm,
+                franka_xyz_m=franka_xyz_m,
+                pendant_mm=pendant_mm,
+                gripper_m=gripper_m,
             )
         ],
         to_transition=robot_action_observation_to_transition,

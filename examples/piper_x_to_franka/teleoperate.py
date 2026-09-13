@@ -30,11 +30,10 @@ Then:
 
     python examples/piper_x_to_franka/teleoperate.py
 
-Piper-X end-effector pose is mapped directly into Franka cartesian space
-(mm to m, ZYX RPY to XYZW). The teaching pendant maps to ``gripper.pos``
-(mm to m). There is no incremental latch. If the axes feel mirrored, change
-``POSITION_AXES``. If the two workspaces do not overlap, set
-``POSITION_OFFSET`` in metres.
+Position is a cuboid-to-cuboid map. Edit the calibration block below after you
+measure each robot's reachable XYZ box. Teaching pendant millimetres map onto
+Franka gripper metres the same way. Reverse a destination pair to invert that
+axis. Orientation is still Piper RPY copied to a Franka quaternion.
 """
 
 import os
@@ -50,9 +49,20 @@ from lerobot.teleoperators.piper_x import (
 from lerobot.utils.visualization_utils import _init_rerun
 
 FPS = 15
-POSITION_SCALE = 1.0
-POSITION_AXES = ("x", "y", "z")
-POSITION_OFFSET = (0.0, 0.0, 0.0)
+
+# 标定：Piper 末端工作空间，单位毫米，相对 Piper 基座。
+PIPER_X_MM = (130.0, 450.0)
+PIPER_Y_MM = (-290.0, 290.0)
+PIPER_Z_MM = (120.0, 500.0)
+
+# 标定：Franka 末端工作空间，单位米，相对 panda_link0。
+FRANKA_X_M = (0.30, 0.60)
+FRANKA_Y_M = (-0.20, 0.20)
+FRANKA_Z_M = (0.15, 0.45)
+
+# 标定：示教器开口（毫米）→ Franka 夹爪开口（米）。
+PENDANT_MM = (51.0, 98.0)
+GRIPPER_M = (0.0, 0.08)
 
 
 def main() -> None:
@@ -67,9 +77,10 @@ def main() -> None:
     teleop = make_teleoperator_from_config(teleop_config)
     robot = FrankaRobot(robot_config)
     teleop_action_processor = make_piper_x_to_franka_teleop_processor(
-        position_scale=POSITION_SCALE,
-        position_axes=POSITION_AXES,
-        position_offset=POSITION_OFFSET,
+        piper_xyz_mm=(PIPER_X_MM, PIPER_Y_MM, PIPER_Z_MM),
+        franka_xyz_m=(FRANKA_X_M, FRANKA_Y_M, FRANKA_Z_M),
+        pendant_mm=PENDANT_MM,
+        gripper_m=GRIPPER_M,
     )
     _, robot_action_processor, robot_observation_processor = make_default_processors()
 
@@ -77,7 +88,7 @@ def main() -> None:
     robot.connect()
     print(f"Connecting Piper-X on {teleop_config.can_name}. Keep dragging the arm until connected.")
     teleop.connect()
-    print("Connected. Piper endpose maps directly to Franka end_pose. Ctrl+C to stop.")
+    print("Connected. Cuboid map Piper -> Franka. Ctrl+C to stop.")
 
     _init_rerun(session_name="piper_x_to_franka_teleop")
     try:

@@ -35,4 +35,4 @@ python examples/piper_x/teleoperate.py
 python examples/piper_x_to_franka/teleoperate.py
 ```
 
-Piper 末端位姿直接映射到 Franka 末端（毫米→米，欧拉角→四元数），示教器映射到 `gripper.pos`。不是增量控制。方向不对就改脚本里的 `POSITION_AXES`，工作空间对不齐就改 `POSITION_OFFSET`。
+末端是两套长方体的线性映射：在 `examples/piper_x_to_franka/teleoperate.py` 里填 Piper XYZ（毫米）和 Franka XYZ（米）。示教器区间同样映射到夹爪区间。目标轴两个数对调即可反向。

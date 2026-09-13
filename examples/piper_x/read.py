@@ -23,7 +23,7 @@ from lerobot.teleoperators.piper_x import PiperXTeleoperator, PiperXTeleoperator
 from lerobot.utils.robot_utils import busy_wait
 
 FPS = 10
-DURATION_S = 30.0
+DURATION_S = 180.0
 
 config = PiperXTeleoperatorConfig(
     id="piper_x",
