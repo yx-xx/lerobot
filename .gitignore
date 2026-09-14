@@ -1,0 +1,27 @@
+# Python bytecode / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test / type-check caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editable installs / packaging
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# ROS 2 colcon (控制机本地工作空间)
+install/
+log/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
