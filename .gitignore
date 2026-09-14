@@ -16,10 +16,6 @@ htmlcov/
 dist/
 build/
 
-# ROS 2 colcon (控制机本地工作空间)
-install/
-log/
-
 # IDE / OS
 .idea/
 .vscode/

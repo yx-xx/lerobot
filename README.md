@@ -2,29 +2,41 @@
 
 这是一个使用LeRobot框架的机器人开发项目
 
-## 构建说明
+## 首次安装
 
 ```bash
 conda create -y -n lerobotx python=3.10
-
 conda activate lerobotx
 
 conda install ffmpeg -c conda-forge
+sudo apt update
+sudo apt install -y can-utils
 
-cd ~/lerobot
-pip install -e ".[feetech]"
-
+cd ~/project/lerobot
+pip install -e ".[feetech,piper]"
 pip install scipy==1.15.3
 ```
 
 
-## 启动
+
+## 启动 Piper-X 遥操作 Franka
+
 ```bash
 conda activate lerobotx
+
 source /opt/ros/humble/setup.bash
 export ROS_DOMAIN_ID=23
+
+sudo ip link set can0 down
+sudo ip link set can0 type can bitrate 1000000
+sudo ip link set can0 up
+
+ip -details link show can0
+
 python examples/piper_x_to_franka/teleoperate.py
 ```
+
+
 
 
 ## 项目结构
@@ -98,4 +110,3 @@ python examples/piper_x_to_franka/teleoperate.py
     ├── utils
     └── utils.py
 ```
-
