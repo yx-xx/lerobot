@@ -5,7 +5,24 @@ from setuptools import Extension, find_packages, setup
 
 
 package_name = "franka_ros2_bridge"
-package_root = os.path.abspath(os.path.dirname(__file__))
+
+
+def source_file(filename: str) -> str:
+    """Find an extension source when colcon stages setup.py in build/.
+
+    ament_python may execute a copied setup.py from build/<package>.  In that
+    case the real source package remains at src/<package> in the workspace.
+    """
+    setup_dir = os.path.abspath(os.path.dirname(__file__))
+    source_roots = (
+        setup_dir,
+        os.path.join(setup_dir, "..", "..", "src", package_name),
+    )
+    for source_root in source_roots:
+        path = os.path.join(source_root, "src", filename)
+        if os.path.isfile(path):
+            return os.path.abspath(path)
+    return os.path.join(setup_dir, "src", filename)
 
 
 def cartesian_stream_extension() -> list[Extension]:
@@ -24,7 +41,7 @@ def cartesian_stream_extension() -> list[Extension]:
     return [
         Extension(
             "franka_ros2_bridge.cartesian_stream",
-            sources=[os.path.join(package_root, "src", "cartesian_stream.cpp")],
+            sources=[source_file("cartesian_stream.cpp")],
             include_dirs=include_dirs,
             libraries=["franka"],
             language="c++",
