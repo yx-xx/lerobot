@@ -6,6 +6,8 @@ from setuptools import Extension, find_packages, setup
 
 package_name = "franka_ros2_bridge"
 
+FRANKA_ROOT = os.environ.get("FRANKA_ROOT", "/home/rt/franka/libfranka")
+
 
 def source_file(filename: str) -> str:
     """Find an extension source when colcon stages setup.py in build/.
@@ -42,10 +44,12 @@ def cartesian_stream_extension() -> list[Extension]:
         Extension(
             "franka_ros2_bridge.cartesian_stream",
             sources=[source_file("cartesian_stream.cpp")],
-            include_dirs=include_dirs,
+            include_dirs=include_dirs + [os.path.join(FRANKA_ROOT, "include")],
+            library_dirs=[os.path.join(FRANKA_ROOT, "lib")],
             libraries=["franka"],
             language="c++",
             extra_compile_args=["-O3", "-std=c++17"],
+            runtime_library_dirs=[os.path.join(FRANKA_ROOT, "lib")],
         )
     ]
 

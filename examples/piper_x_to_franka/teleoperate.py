@@ -81,14 +81,23 @@ def main() -> None:
     )
     teleop = make_teleoperator_from_config(teleop_config)
     robot = FrankaRobot(robot_config)
+    # teleop_action_processor = make_piper_x_to_franka_teleop_processor(
+    #     piper_xyz_mm=(PIPER_X_MM, PIPER_Y_MM, PIPER_Z_MM),
+    #     franka_xyz_m=(FRANKA_X_M, FRANKA_Y_M, FRANKA_Z_M),
+    #     pendant_mm=PENDANT_MM,
+    #     gripper_m=GRIPPER_M,
+    #     piper_ref_rpy_deg=PIPER_REF_RPY_DEG,
+    #     franka_ref_quat_xyzw=FRANKA_REF_QUAT_XYZW,
+    # )
     teleop_action_processor = make_piper_x_to_franka_teleop_processor(
         piper_xyz_mm=(PIPER_X_MM, PIPER_Y_MM, PIPER_Z_MM),
         franka_xyz_m=(FRANKA_X_M, FRANKA_Y_M, FRANKA_Z_M),
         pendant_mm=PENDANT_MM,
         gripper_m=GRIPPER_M,
         piper_ref_rpy_deg=PIPER_REF_RPY_DEG,
-        franka_ref_quat_xyzw=FRANKA_REF_QUAT_XYZW,
+        franka_ref_quat_xyzw=(-0.030593, -0.009472, -0.400091, 0.915916),
     )
+
     _, robot_action_processor, robot_observation_processor = make_default_processors()
 
     try:
