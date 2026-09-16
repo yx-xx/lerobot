@@ -6,18 +6,15 @@
 默认笛卡尔模式是 **libfranka 1 kHz 流式位姿环**：控制线程不退出，ROS 只更新最新目标。
 夹爪仍用 frankx。点到点 `LinearMotion` 仅在 `cartesian_mode: ptp` 时启用。
 
-## 每次启动
-
-每个新终端都要先执行下面两行，再启动节点。不要写进 `~/.bashrc`。
+## 控制机每次启动
 
 ```bash
 source /opt/ros/humble/setup.bash
 export ROS_DOMAIN_ID=23
+
 source ~/franka_ws/install/setup.bash
 ros2 launch franka_ros2_bridge franka_bridge.launch.py
 ```
-
-确认状态话题在发：
 
 ```bash
 ros2 topic hz /franka/joint_state
@@ -26,17 +23,19 @@ ros2 topic echo --once /franka/end_pose
 
 同一 ROS 网络里的其它机器也必须 source Humble，并且 `ROS_DOMAIN_ID` 相同。
 
-## 首次构建
-
-控制机需要：ROS 2 Humble、可链接的 **libfranka**、**pybind11**、以及可导入的 **frankx**（夹爪）。
+## 控制机首次 build
 
 ```bash
 source /opt/ros/humble/setup.bash
 export ROS_DOMAIN_ID=23
 python3 -m pip install pybind11
 
-mkdir -p ~/franka_ws/src
-# ln -s /path/to/franka_ros2_bridge ~/franka_ws/src/franka_ros2_bridge
+colcon build --symlink-install --packages-select franka_ros2_bridge
+source install/setup.bash
+```
+
+```bash
+source /opt/ros/humble/setup.bash
 cd ~/franka_ws
 colcon build --symlink-install --packages-select franka_ros2_bridge
 source install/setup.bash
