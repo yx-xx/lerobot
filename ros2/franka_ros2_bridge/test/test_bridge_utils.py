@@ -1,6 +1,7 @@
 import math
 import time
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -190,7 +191,37 @@ def test_stream_controller_rejects_bad_limits() -> None:
     with pytest.raises(ValueError):
         StreamController("172.16.0.2", max_linear_velocity=0.0)
     with pytest.raises(ValueError):
+        StreamController("172.16.0.2", max_linear_acceleration=0.0)
+    with pytest.raises(ValueError):
+        StreamController("172.16.0.2", max_linear_jerk=0.0)
+    with pytest.raises(ValueError):
         StreamController("172.16.0.2", max_angular_velocity=-1.0)
+    with pytest.raises(ValueError):
+        StreamController("172.16.0.2", max_angular_acceleration=0.0)
+    with pytest.raises(ValueError):
+        StreamController("172.16.0.2", max_angular_jerk=0.0)
+
+
+def test_stream_controller_rejects_a_stopped_native_stream() -> None:
+    controller = StreamController("172.16.0.2")
+    native_stream = SimpleNamespace(check_error=MagicMock(), running=lambda: False)
+    controller._stream = native_stream
+
+    with pytest.raises(RuntimeError, match="not running"):
+        controller._require_stream()
+
+    native_stream.check_error.assert_called_once_with()
+
+
+def test_stream_controller_propagates_native_control_error() -> None:
+    controller = StreamController("172.16.0.2")
+    controller._stream = SimpleNamespace(
+        check_error=MagicMock(side_effect=RuntimeError("control failed")),
+        running=lambda: False,
+    )
+
+    with pytest.raises(RuntimeError, match="control failed"):
+        controller._require_stream()
 
 
 def test_joints_from_frankx_prefer_current_joint_positions() -> None:

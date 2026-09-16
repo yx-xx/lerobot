@@ -24,20 +24,36 @@ class StreamController:
         robot_ip: str,
         *,
         max_linear_velocity: float = 0.35,
+        max_linear_acceleration: float = 1.0,
+        max_linear_jerk: float = 5.0,
         max_angular_velocity: float = 1.2,
+        max_angular_acceleration: float = 2.0,
+        max_angular_jerk: float = 10.0,
         gripper_speed: float = 0.04,
     ) -> None:
         if not robot_ip.strip():
             raise ValueError("robot_ip must not be empty")
         if not 0.0 < max_linear_velocity <= 2.0:
             raise ValueError("max_linear_velocity must be in (0, 2]")
+        if not 0.0 < max_linear_acceleration <= 20.0:
+            raise ValueError("max_linear_acceleration must be in (0, 20]")
+        if not 0.0 < max_linear_jerk <= 10000.0:
+            raise ValueError("max_linear_jerk must be in (0, 10000]")
         if not 0.0 < max_angular_velocity <= 3.0:
             raise ValueError("max_angular_velocity must be in (0, 3]")
+        if not 0.0 < max_angular_acceleration <= 30.0:
+            raise ValueError("max_angular_acceleration must be in (0, 30]")
+        if not 0.0 < max_angular_jerk <= 15000.0:
+            raise ValueError("max_angular_jerk must be in (0, 15000]")
         if not 0.0 < gripper_speed <= 1.0:
             raise ValueError("gripper_speed must be in (0, 1]")
         self._robot_ip = robot_ip
         self._max_linear_velocity = max_linear_velocity
+        self._max_linear_acceleration = max_linear_acceleration
+        self._max_linear_jerk = max_linear_jerk
         self._max_angular_velocity = max_angular_velocity
+        self._max_angular_acceleration = max_angular_acceleration
+        self._max_angular_jerk = max_angular_jerk
         self._gripper_speed = gripper_speed
         self._stream: Any | None = None
         self._gripper: Any | None = None
@@ -55,16 +71,22 @@ class StreamController:
         stream = CartesianStreamer(
             self._robot_ip,
             self._max_linear_velocity,
+            self._max_linear_acceleration,
+            self._max_linear_jerk,
             self._max_angular_velocity,
+            self._max_angular_acceleration,
+            self._max_angular_jerk,
         )
         stream.start()
         try:
             import frankx
-        except ImportError as exc:
+            gripper = frankx.Gripper(self._robot_ip)
+            gripper.gripper_speed = self._gripper_speed
+        except Exception as exc:
             stream.stop()
-            raise RuntimeError("Install frankx to use the gripper") from exc
-        gripper = frankx.Gripper(self._robot_ip)
-        gripper.gripper_speed = self._gripper_speed
+            if isinstance(exc, ImportError):
+                raise RuntimeError("Install frankx to use the gripper") from exc
+            raise
         self._stream = stream
         self._gripper = gripper
 
@@ -131,9 +153,13 @@ class StreamController:
         gripper.move(float(command.width))
 
     def _require_stream(self) -> Any:
-        if self._stream is None:
+        stream = self._stream
+        if stream is None:
             raise RuntimeError("StreamController is not connected")
-        return self._stream
+        stream.check_error()
+        if not stream.running():
+            raise RuntimeError("libfranka cartesian stream is not running")
+        return stream
 
     def _read_gripper_width(self) -> float:
         with self._gripper_lock:

@@ -79,7 +79,11 @@ class FrankaBridgeNode(Node):
         self.declare_parameter("gripper_speed", 0.04)
         self.declare_parameter("cartesian_mode", "stream")
         self.declare_parameter("max_linear_velocity", 0.35)
+        self.declare_parameter("max_linear_acceleration", 1.0)
+        self.declare_parameter("max_linear_jerk", 5.0)
         self.declare_parameter("max_angular_velocity", 1.2)
+        self.declare_parameter("max_angular_acceleration", 2.0)
+        self.declare_parameter("max_angular_jerk", 10.0)
 
         self.base_frame = str(self.get_parameter("base_frame").value)
         self.command_timeout = float(self.get_parameter("command_timeout_sec").value)
@@ -100,7 +104,11 @@ class FrankaBridgeNode(Node):
         gripper_speed = float(self.get_parameter("gripper_speed").value)
         cartesian_mode = str(self.get_parameter("cartesian_mode").value).strip().lower()
         max_linear_velocity = float(self.get_parameter("max_linear_velocity").value)
+        max_linear_acceleration = float(self.get_parameter("max_linear_acceleration").value)
+        max_linear_jerk = float(self.get_parameter("max_linear_jerk").value)
         max_angular_velocity = float(self.get_parameter("max_angular_velocity").value)
+        max_angular_acceleration = float(self.get_parameter("max_angular_acceleration").value)
+        max_angular_jerk = float(self.get_parameter("max_angular_jerk").value)
 
         if rate <= 0.0 or self.command_timeout <= 0.0:
             raise ValueError("publish_rate_hz and command_timeout_sec must be positive")
@@ -138,7 +146,11 @@ class FrankaBridgeNode(Node):
             self._controller = StreamController(
                 robot_ip,
                 max_linear_velocity=max_linear_velocity,
+                max_linear_acceleration=max_linear_acceleration,
+                max_linear_jerk=max_linear_jerk,
                 max_angular_velocity=max_angular_velocity,
+                max_angular_acceleration=max_angular_acceleration,
+                max_angular_jerk=max_angular_jerk,
                 gripper_speed=gripper_speed,
             )
         elif cartesian_mode == "ptp":
@@ -152,9 +164,9 @@ class FrankaBridgeNode(Node):
             )
         else:
             raise ValueError("cartesian_mode must be 'stream' or 'ptp'")
-        self._last_published_state = None
         self._controller.connect()
-        self._last_published_state = self._controller.read_state()
+        self._controller.read_state()
+        self._state_error_logged = False
         if self._streaming:
             self.get_logger().info("Cartesian pose stream is running at 1 kHz")
         self._commands = CommandQueue(self.command_timeout)
@@ -248,12 +260,12 @@ class FrankaBridgeNode(Node):
             command = self._commands.take(wait_timeout_sec=0.02)
             if command is None:
                 continue
+            if self._commands.is_stale(command):
+                self.get_logger().warning(f"Dropped stale {command.mode} command")
+                continue
             if command.mode == "joint":
                 if self._streaming:
                     self.get_logger().warning("Ignoring joint_cmd while cartesian stream is running")
-                    continue
-                if self._commands.is_stale(command):
-                    self.get_logger().warning("Dropped stale joint command")
                     continue
                 try:
                     assert command.joint is not None
@@ -283,13 +295,14 @@ class FrankaBridgeNode(Node):
     def _publish_state(self) -> None:
         try:
             state = self._controller.read_state()
-            self._last_published_state = state
+            self._state_error_logged = False
         except Exception as exc:
-            state = getattr(self, "_last_published_state", None)
-            if state is None:
-                self.get_logger().error(f"State read failed: {exc}")
-                return
-            self.get_logger().warning(f"State read failed, republishing last sample: {exc}")
+            # Never stamp an old sample as fresh: clients use receipt time for
+            # their stale-state watchdog and must notice a stopped control loop.
+            if not self._state_error_logged:
+                self.get_logger().error(f"State read failed; state publication stopped: {exc}")
+                self._state_error_logged = True
+            return
 
         stamp = self.get_clock().now().to_msg()
         joint_message = to_joint_state_msg(

@@ -52,7 +52,12 @@ FRANKA_SKIP_STREAM_EXT=1 colcon build --symlink-install --packages-select franka
 若提示 `cartesian_stream native module is missing`，说明扩展没编上，检查 pybind11、`-lfranka` 和 colcon 编译输出。
 
 按现场网络和安全空间编辑 `config/franka_bridge.yaml`。
-流式限速是 `max_linear_velocity`（m/s）和 `max_angular_velocity`（rad/s）。
+流式轨迹同时限制速度、加速度和 jerk：
+
+- 平移：`max_linear_velocity`、`max_linear_acceleration`、`max_linear_jerk`
+- 旋转：`max_angular_velocity`、`max_angular_acceleration`、`max_angular_jerk`
+
+控制线程异常会停止状态发布并输出实际的 libfranka 错误，避免把缓存状态伪装成新状态。
 
 ## 接口
 

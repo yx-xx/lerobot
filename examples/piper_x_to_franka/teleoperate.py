@@ -91,14 +91,14 @@ def main() -> None:
     )
     _, robot_action_processor, robot_observation_processor = make_default_processors()
 
-    print("Connecting Franka ROS 2 client. Confirm joint, end_pose, and gripper topics.")
-    robot.connect()
-    print(f"Connecting Piper-X on {teleop_config.can_name}. Keep dragging the arm until connected.")
-    teleop.connect()
-    print("Connected. Cuboid map Piper -> Franka. Ctrl+C to stop.")
-
-    _init_rerun(session_name="piper_x_to_franka_teleop")
     try:
+        print("Connecting Franka ROS 2 client. Confirm joint, end_pose, and gripper topics.")
+        robot.connect()
+        print(f"Connecting Piper-X on {teleop_config.can_name}. Keep dragging the arm until connected.")
+        teleop.connect()
+        print("Connected. Cuboid map Piper -> Franka. Ctrl+C to stop.")
+
+        _init_rerun(session_name="piper_x_to_franka_teleop")
         teleop_loop(
             teleop=teleop,
             robot=robot,
@@ -111,8 +111,10 @@ def main() -> None:
     except KeyboardInterrupt:
         print("Stopped.")
     finally:
-        teleop.disconnect()
-        robot.disconnect()
+        if teleop.is_connected:
+            teleop.disconnect()
+        if robot.is_connected:
+            robot.disconnect()
 
 
 if __name__ == "__main__":

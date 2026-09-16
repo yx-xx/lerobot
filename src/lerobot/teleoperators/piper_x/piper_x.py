@@ -198,7 +198,7 @@ class PiperXTeleoperator(Teleoperator):
         self._arm = None
         self._teaching_pendant = None
         self._joint_source: str | None = None
-        self._last_sdk_timestamp = 0.0
+        self._last_sdk_timestamps: dict[str, float] = {}
         self._last_local_update = 0.0
         self._last_joints_rad: list[float] | None = None
         self._last_pose_m_rad: list[float] | None = None
@@ -329,7 +329,7 @@ class PiperXTeleoperator(Teleoperator):
 
     def _cache_flange_sample(self, timestamp: float, pose_m_rad: list[float]) -> None:
         self._joint_source = "flange"
-        self._last_sdk_timestamp = timestamp
+        self._last_sdk_timestamps["flange"] = timestamp
         self._last_local_update = time.perf_counter()
         self._last_pose_m_rad = list(pose_m_rad)
         joints = self._arm.get_joint_angles()
@@ -342,7 +342,7 @@ class PiperXTeleoperator(Teleoperator):
 
     def _cache_sample(self, source: str, timestamp: float, joints_rad: list[float]) -> None:
         self._joint_source = source
-        self._last_sdk_timestamp = timestamp
+        self._last_sdk_timestamps[source] = timestamp
         self._last_local_update = time.perf_counter()
         self._last_joints_rad = list(joints_rad)
         try:
@@ -403,15 +403,20 @@ class PiperXTeleoperator(Teleoperator):
         )
 
     def _refresh_freshness(self) -> None:
+        samples = list(self._iter_state_samples())
         preferred = self._joint_source or "feedback"
-        other = "leader" if preferred == "feedback" else "feedback"
-        for source in (preferred, other):
-            for sample_source, timestamp, joints in self._iter_joint_samples():
+        source_order = tuple(dict.fromkeys((preferred, *_JOINT_SOURCES, "flange")))
+        for source in source_order:
+            for sample_source, timestamp, payload in samples:
                 if sample_source != source:
                     continue
-                if timestamp != self._last_sdk_timestamp:
-                    self._cache_sample(sample_source, timestamp, joints)
-                    return
+                if timestamp == self._last_sdk_timestamps.get(sample_source, 0.0):
+                    continue
+                if sample_source == "flange":
+                    self._cache_flange_sample(timestamp, payload)
+                else:
+                    self._cache_sample(sample_source, timestamp, payload)
+                return
 
     def _require_fresh_or_cached_state(self) -> None:
         if not self.is_connected:
@@ -469,7 +474,7 @@ class PiperXTeleoperator(Teleoperator):
         self._arm = None
         self._teaching_pendant = None
         self._joint_source = None
-        self._last_sdk_timestamp = 0.0
+        self._last_sdk_timestamps = {}
         self._last_local_update = 0.0
         self._last_joints_rad = None
         self._last_pose_m_rad = None

@@ -13,14 +13,18 @@ def cartesian_stream_extension() -> list[Extension]:
     try:
         import pybind11
     except ImportError:
-        print("pybind11 is not installed; skip building cartesian_stream. "
-              "On the Franka computer: pip install pybind11 && colcon build")
-        return []
+        # A system pybind11-dev package installs headers without a Python module.
+        # Let the compiler find those headers and fail the build clearly if they
+        # are unavailable. Silently omitting this extension creates a bridge that
+        # installs successfully but cannot run in stream mode.
+        include_dirs = []
+    else:
+        include_dirs = [pybind11.get_include()]
     return [
         Extension(
             "franka_ros2_bridge.cartesian_stream",
             sources=["src/cartesian_stream.cpp"],
-            include_dirs=[pybind11.get_include()],
+            include_dirs=include_dirs,
             libraries=["franka"],
             language="c++",
             extra_compile_args=["-O3", "-std=c++17"],

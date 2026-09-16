@@ -9,7 +9,11 @@ franka_bridge:
     publish_rate_hz: 50.0
     cartesian_mode: stream
     max_linear_velocity: 0.35
+    max_linear_acceleration: 1.0
+    max_linear_jerk: 5.0
     max_angular_velocity: 1.2
+    max_angular_acceleration: 2.0
+    max_angular_jerk: 10.0
     velocity_rel: 0.25
     acceleration_rel: 0.20
     jerk_rel: 0.20
