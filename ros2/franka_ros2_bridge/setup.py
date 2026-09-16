@@ -5,6 +5,7 @@ from setuptools import Extension, find_packages, setup
 
 
 package_name = "franka_ros2_bridge"
+package_root = os.path.abspath(os.path.dirname(__file__))
 
 
 def cartesian_stream_extension() -> list[Extension]:
@@ -23,7 +24,7 @@ def cartesian_stream_extension() -> list[Extension]:
     return [
         Extension(
             "franka_ros2_bridge.cartesian_stream",
-            sources=["src/cartesian_stream.cpp"],
+            sources=[os.path.join(package_root, "src", "cartesian_stream.cpp")],
             include_dirs=include_dirs,
             libraries=["franka"],
             language="c++",

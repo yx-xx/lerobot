@@ -25,14 +25,29 @@ ros2 topic echo --once /franka/end_pose
 
 ## 控制机首次 build
 
+先确认工作区中的包是完整的当前源码。该包必须包含
+`src/cartesian_stream.cpp`；控制机若使用软链接，请让它指向实际的仓库目录，
+不要指向旧版本或不完整的拷贝：
+
+```bash
+ls -l ~/franka_ws/src/franka_ros2_bridge
+test -f ~/franka_ws/src/franka_ros2_bridge/src/cartesian_stream.cpp
+```
+
+第二条命令没有输出即表示文件存在。若不存在，先更新或重新同步
+`franka_ros2_bridge` 源码，再继续构建。
+
 ```bash
 source /opt/ros/humble/setup.bash
 export ROS_DOMAIN_ID=23
 python3 -m pip install pybind11
 
+cd ~/franka_ws
 colcon build --symlink-install --packages-select franka_ros2_bridge
 source install/setup.bash
 ```
+
+代码更新后，在控制机重新执行：
 
 ```bash
 source /opt/ros/humble/setup.bash
