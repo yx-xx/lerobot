@@ -30,8 +30,8 @@ Then:
 
     python examples/piper_x_to_franka/teleoperate.py
 
-Position is a cuboid-to-cuboid map. Orientation uses one corresponding pose:
-when Piper is at PIPER_REF_RPY_DEG, Franka should be at FRANKA_REF_QUAT_XYZW.
+Position is a cuboid-to-cuboid map. Orientation mapping remains calibrated, but
+can be temporarily disabled so Franka keeps the orientation measured at startup.
 """
 
 import math
@@ -47,7 +47,10 @@ from lerobot.teleoperators.piper_x import (
 )
 from lerobot.utils.visualization_utils import _init_rerun
 
-FPS = 20
+FPS = 30
+
+# 启动姿态锁定
+LOCK_FRANKA_STARTUP_ORIENTATION = False
 
 # 标定：Piper 末端工作空间，单位毫米，相对 Piper 基座。
 PIPER_X_MM = (130.0, 450.0)
@@ -63,9 +66,10 @@ FRANKA_Z_M = (0.17, 0.60)
 PENDANT_MM = (51.0, 98.0)
 GRIPPER_M = (0.0045, 0.0846)
 
-# 标定：一对“看起来一样”的对应姿态。不要把两边的零位直接当同一姿态。
+# 标定：对应姿态。
 PIPER_REF_RPY_DEG = (-177.32, -3.01, -86.34)
-FRANKA_REF_QUAT_XYZW = (0.000217, 0.000293, -0.383081, 0.923715)
+FRANKA_REF_QUAT_XYZW = (0.9997537578, -0.0156632982, 0.0147608992, 0.0054037621)
+
 
 def main() -> None:
     teleop_config = PiperXTeleoperatorConfig(
@@ -81,28 +85,38 @@ def main() -> None:
     )
     teleop = make_teleoperator_from_config(teleop_config)
     robot = FrankaRobot(robot_config)
-    # teleop_action_processor = make_piper_x_to_franka_teleop_processor(
-    #     piper_xyz_mm=(PIPER_X_MM, PIPER_Y_MM, PIPER_Z_MM),
-    #     franka_xyz_m=(FRANKA_X_M, FRANKA_Y_M, FRANKA_Z_M),
-    #     pendant_mm=PENDANT_MM,
-    #     gripper_m=GRIPPER_M,
-    #     piper_ref_rpy_deg=PIPER_REF_RPY_DEG,
-    #     franka_ref_quat_xyzw=FRANKA_REF_QUAT_XYZW,
-    # )
-    teleop_action_processor = make_piper_x_to_franka_teleop_processor(
+    mapped_action_processor = make_piper_x_to_franka_teleop_processor(
         piper_xyz_mm=(PIPER_X_MM, PIPER_Y_MM, PIPER_Z_MM),
         franka_xyz_m=(FRANKA_X_M, FRANKA_Y_M, FRANKA_Z_M),
         pendant_mm=PENDANT_MM,
         gripper_m=GRIPPER_M,
         piper_ref_rpy_deg=PIPER_REF_RPY_DEG,
-        franka_ref_quat_xyzw=(-0.030593, -0.009472, -0.400091, 0.915916),
+        franka_ref_quat_xyzw=FRANKA_REF_QUAT_XYZW,
     )
+    quaternion_keys = ("end_pose.qx", "end_pose.qy", "end_pose.qz", "end_pose.qw")
+    fixed_quaternion: tuple[float, float, float, float] | None = None
+
+    def teleop_action_processor(data):
+        if fixed_quaternion is None:
+            raise RuntimeError("Franka startup orientation has not been read")
+        action = mapped_action_processor(data)
+        if LOCK_FRANKA_STARTUP_ORIENTATION:
+            for key, value in zip(quaternion_keys, fixed_quaternion):
+                action[key] = value
+        return action
 
     _, robot_action_processor, robot_observation_processor = make_default_processors()
 
     try:
         print("Connecting Franka ROS 2 client. Confirm joint, end_pose, and gripper topics.")
         robot.connect()
+        initial_observation = robot.get_observation()
+        initial_position = tuple(float(initial_observation[f"end_pose.{axis}"]) for axis in "xyz")
+        fixed_quaternion = tuple(float(initial_observation[key]) for key in quaternion_keys)
+        print(f"Franka startup XYZ (m): {initial_position}")
+        print(f"Franka startup quaternion XYZW: {fixed_quaternion}")
+        if LOCK_FRANKA_STARTUP_ORIENTATION:
+            print("Franka startup orientation is locked for this run.")
         print(f"Connecting Piper-X on {teleop_config.can_name}. Keep dragging the arm until connected.")
         teleop.connect()
         print("Connected. Cuboid map Piper -> Franka. Ctrl+C to stop.")
