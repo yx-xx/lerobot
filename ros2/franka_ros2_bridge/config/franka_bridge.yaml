@@ -1,29 +1,83 @@
 franka_bridge:
   ros__parameters:
+    # Franka 控制柜地址；只有现场网络地址变化时才修改。
     robot_ip: "172.16.0.2"
+
+    # ROS 2 接口名称。主臂电脑必须发布到 end_pose_cmd_topic 和 gripper_cmd_topic。
     joint_state_topic: "/franka/joint_state"
     end_pose_topic: "/franka/end_pose"
     joint_cmd_topic: "/franka/joint_cmd"
     end_pose_cmd_topic: "/franka/end_pose_cmd"
     base_frame: "panda_link0"
+
+    # 状态发布频率，单位 Hz。它不改变内部 1 kHz 控制频率；通常 50~100 Hz 足够。
     publish_rate_hz: 50.0
+
+    # 遥操作必须使用 stream。ptp 适合离散点到点运动，不适合连续跟随。
     cartesian_mode: stream
-    max_linear_velocity: 0.35
-    max_linear_acceleration: 1.0
-    max_linear_jerk: 5.0
-    max_angular_velocity: 1.2
-    max_angular_acceleration: 2.0
-    max_angular_jerk: 10.0
+
+    # 平移动态限制，单位依次为 m/s、m/s^2、m/s^3。
+    # velocity 决定最高跟随速度；acceleration 决定起停响应；jerk 越小越柔和但越迟钝。
+    # 当前是遥操作响应型参数，仍明显低于 Franka 笛卡尔硬件上限。
+    max_linear_velocity: 0.40
+    max_linear_acceleration: 2.0
+    max_linear_jerk: 12.0
+
+    # 旋转动态限制，单位依次为 rad/s、rad/s^2、rad/s^3。
+    # 姿态映射通常比位置更容易激发关节高速运动，建议比平移更谨慎地增加。
+    max_angular_velocity: 0.80
+    max_angular_acceleration: 4.0
+    max_angular_jerk: 25.0
+
+    # 在线轨迹的最短规划时间为 1/(2*pi*此频率)，5 Hz 对应约 32 ms。
+    # 它不是主臂发布频率，也不再是直接把位置误差放大的 P 增益。
+    # 实际响应同时受速度、加速度、jerk 和关节限制影响。
+    tracking_frequency_hz: 5.0
+
+    # 忽略主臂静止时的小幅测量噪声，单位分别为 m 和 rad。
+    linear_deadband: 0.001
+    angular_deadband: 0.010
+
+    # 在 Jacobian 零空间中保持启动时的第三关节姿态，减少 7 自由度冗余构型漂移。
+    # 这不是向 Franka 笛卡尔 IK 发送固定 elbow，因此不会产生内部 IK 分支跳变。
+    lock_elbow: true
+
+    # 保留旧参数名，现仅表示启动时的动态限制比例，不再锁存/等待第一点。
+    # 从机器人当前运动状态跟踪最新绝对目标，不计算启动偏移。
+    initial_sync_scale: 0.60
+    # 在此时间内平滑恢复完整动态限制；全过程可以移动主臂，不需要等待到位。
+    startup_ramp_sec: 0.30
+
+    # 将 libfranka 1 kHz 实时线程固定到独立 CPU；-1 表示不固定。
+    # 本机 CPU 4 与当前机器人网卡 IRQ CPU 5 分离。
+    control_cpu: 4
+
+    # 以下三个参数仅在 cartesian_mode=ptp 时使用；stream 模式下不生效。
     velocity_rel: 0.25
     acceleration_rel: 0.20
     jerk_rel: 0.20
+
+    # ROS 指令在工作线程中等待超过此时间后视为过期，单位秒。
+    # 该值不是失联急停时间；30 Hz 遥操作一般无需频繁修改。
     command_timeout_sec: 2.0
+
+    # Panda 硬件关节限位，单位 rad。除非机器人型号/官方限位发生变化，否则不要修改。
     joint_lower_limits: [-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973]
     joint_upper_limits: [2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973]
+
+    # 允许的末端 XYZ 工作空间，单位 m，坐标系为 base_frame。
+    # 应按现场测量设置，并为桌面、底座、相机和人员区域保留安全余量。
     workspace_min: [0.20, -0.60, 0.02]
     workspace_max: [0.80, 0.60, 0.90]
+
+    # 夹爪接口。宽度和速度单位均为 m、m/s；gripper_max 应以实际夹爪行程为准。
     gripper_state_topic: "/franka/gripper_state"
     gripper_cmd_topic: "/franka/gripper_cmd"
     gripper_min: 0.0
     gripper_max: 0.08
     gripper_speed: 0.04
+    # 后台独立读取夹爪状态，原生 I/O 释放 GIL；ROS 状态回调只读缓存，不等待网络。
+    # 2 Hz 足够显示；夹爪状态过期时仅暂停夹爪发布，机械臂状态继续更新。
+    gripper_poll_rate_hz: 2.0
+    # 小于该宽度变化时不重复发送阻塞式夹爪运动指令，减少控制网卡负载。
+    gripper_command_deadband: 0.001

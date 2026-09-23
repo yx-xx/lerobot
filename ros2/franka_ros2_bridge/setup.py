@@ -7,6 +7,7 @@ from setuptools import Extension, find_packages, setup
 package_name = "franka_ros2_bridge"
 
 FRANKA_ROOT = os.environ.get("FRANKA_ROOT", "/home/rt/franka/libfranka")
+EIGEN3_INCLUDE_DIR = os.environ.get("EIGEN3_INCLUDE_DIR", "/usr/include/eigen3")
 
 
 def source_file(filename: str) -> str:
@@ -40,15 +41,28 @@ def cartesian_stream_extension() -> list[Extension]:
         include_dirs = []
     else:
         include_dirs = [pybind11.get_include()]
+    stream_source = source_file("cartesian_stream.cpp")
+    source_root = os.path.dirname(os.path.dirname(stream_source))
+    ruckig_root = os.path.join(source_root, "third_party", "ruckig")
+    ruckig_sources = sorted(glob(os.path.join(ruckig_root, "src", "ruckig", "*.cpp")))
+    if not ruckig_sources:
+        raise RuntimeError("Vendored Ruckig 0.15.3 sources are missing; sync the complete bridge package")
     return [
         Extension(
             "franka_ros2_bridge.cartesian_stream",
-            sources=[source_file("cartesian_stream.cpp")],
-            include_dirs=include_dirs + [os.path.join(FRANKA_ROOT, "include")],
+            sources=[stream_source, *ruckig_sources],
+            depends=[source_file("cartesian_tracking.h"), source_file("joint_limits.h"),
+                     os.path.join(source_root, "setup.py")]
+            + sorted(glob(os.path.join(ruckig_root, "include", "ruckig", "*.hpp"))),
+            include_dirs=include_dirs
+            + [os.path.join(FRANKA_ROOT, "include"), EIGEN3_INCLUDE_DIR,
+               os.path.join(ruckig_root, "include")],
             library_dirs=[os.path.join(FRANKA_ROOT, "lib")],
             libraries=["franka"],
             language="c++",
-            extra_compile_args=["-O3", "-std=c++17"],
+            # Keep the vendored planner's symbols local: frankx may load its
+            # own older Ruckig into the same Python process in PTP mode.
+            extra_compile_args=["-O3", "-std=c++17", "-fvisibility=hidden"],
             runtime_library_dirs=[os.path.join(FRANKA_ROOT, "lib")],
         )
     ]
@@ -63,7 +77,10 @@ setup(
         (f"share/{package_name}", ["package.xml"]),
         (f"share/{package_name}/launch", glob("launch/*.launch.py")),
         (f"share/{package_name}/config", glob("config/*.yaml")),
+        (f"share/{package_name}/docs", glob("docs/*.md")),
         (f"share/{package_name}", ["README.md"]),
+        (f"share/{package_name}/third_party/ruckig",
+         ["third_party/ruckig/LICENSE", "third_party/ruckig/README.bridge.md"]),
     ],
     ext_modules=cartesian_stream_extension(),
     install_requires=["setuptools"],

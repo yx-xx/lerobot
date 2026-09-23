@@ -1,0 +1,3 @@
+recursive-include src *.cpp *.h
+recursive-include test *.cpp *.py
+recursive-include third_party/ruckig *.hpp *.cpp *.md LICENSE

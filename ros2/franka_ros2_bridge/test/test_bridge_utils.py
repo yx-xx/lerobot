@@ -1,5 +1,6 @@
 import math
 import time
+import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -200,6 +201,38 @@ def test_stream_controller_rejects_bad_limits() -> None:
         StreamController("172.16.0.2", max_angular_acceleration=0.0)
     with pytest.raises(ValueError):
         StreamController("172.16.0.2", max_angular_jerk=0.0)
+    with pytest.raises(ValueError):
+        StreamController("172.16.0.2", tracking_frequency_hz=0.0)
+    with pytest.raises(ValueError):
+        StreamController("172.16.0.2", linear_deadband=-0.001)
+    with pytest.raises(ValueError):
+        StreamController("172.16.0.2", angular_deadband=-0.001)
+    with pytest.raises(TypeError):
+        StreamController("172.16.0.2", lock_elbow=1)
+    with pytest.raises(ValueError):
+        StreamController("172.16.0.2", control_cpu=-2)
+    with pytest.raises(ValueError):
+        StreamController("172.16.0.2", initial_sync_scale=0.0)
+    with pytest.raises(ValueError):
+        StreamController("172.16.0.2", initial_sync_scale=1.1)
+    with pytest.raises(ValueError):
+        StreamController("172.16.0.2", gripper_poll_rate_hz=0.0)
+
+
+@pytest.mark.parametrize("duration", [0.0, -0.1, 5.1, math.nan, math.inf])
+def test_startup_ramp_rejects_invalid_duration(duration) -> None:
+    with pytest.raises(ValueError, match="startup_ramp_sec"):
+        StreamController("172.16.0.2", startup_ramp_sec=duration)
+
+
+def test_stream_controller_forwards_absolute_target_without_rebasing() -> None:
+    controller = StreamController("172.16.0.2")
+    native_stream = SimpleNamespace(check_error=MagicMock(), running=lambda: True, set_target=MagicMock())
+    controller._stream = native_stream
+    for position in ((0.43, -0.1, 0.4), (0.44, -0.1, 0.4)):
+        command = EndPoseCommand(position=position, quaternion=(0.0, 0.0, 0.0, 1.0), received_at=0.0)
+        controller.set_end_pose_target(command)
+        native_stream.set_target.assert_called_with(*position, 0.0, 0.0, 0.0, 1.0)
 
 
 def test_stream_controller_rejects_a_stopped_native_stream() -> None:
@@ -222,6 +255,77 @@ def test_stream_controller_propagates_native_control_error() -> None:
 
     with pytest.raises(RuntimeError, match="control failed"):
         controller._require_stream()
+
+
+def test_stream_controller_returns_native_diagnostics() -> None:
+    controller = StreamController("172.16.0.2")
+    diagnostics = {"control_command_success_rate": 1.0, "minimum_singular_value": 0.2}
+    native_stream = SimpleNamespace(
+        check_error=MagicMock(), running=lambda: True, get_diagnostics=lambda: diagnostics
+    )
+    controller._stream = native_stream
+
+    result = controller.get_diagnostics()
+    assert result["control_command_success_rate"] == diagnostics["control_command_success_rate"]
+    assert result["minimum_singular_value"] == diagnostics["minimum_singular_value"]
+    assert result["gripper_age_ms"] == -1.0
+    assert result["gripper_poll_errors"] == 0
+    native_stream.check_error.assert_called_once_with()
+
+
+def test_blocked_gripper_poll_does_not_block_arm_state_or_targets() -> None:
+    controller = StreamController("172.16.0.2")
+    entered, release, stop = threading.Event(), threading.Event(), threading.Event()
+    def delayed_width():
+        entered.set()
+        release.wait(timeout=2.0)
+        return .03
+    gripper = SimpleNamespace(width=MagicMock(side_effect=delayed_width))
+    controller._gripper = gripper
+    controller._gripper_poll_period = .001
+    controller._last_gripper_width = .04
+    controller._last_gripper_poll = time.monotonic() - 10.0
+    controller._stream = SimpleNamespace(
+        check_error=MagicMock(), running=lambda: True, set_target=MagicMock(),
+        get_state=lambda: ((0.0,) * 7, (.4, 0., .3), (0., 0., 0., 1.)),
+    )
+    worker = threading.Thread(target=controller._poll_gripper, args=(gripper, stop), daemon=True)
+    worker.start()
+    try:
+        assert entered.wait(timeout=1.0)
+        assert controller.read_state().gripper_width == pytest.approx(.04)
+        assert not controller.gripper_state_is_fresh()
+        command = EndPoseCommand(position=(.45, 0., .3), quaternion=(0., 0., 0., 1.), received_at=0.)
+        controller.set_end_pose_target(command)
+        controller._stream.set_target.assert_called_once_with(.45, 0., .3, 0., 0., 0., 1.)
+        gripper.width.assert_called_once_with()
+    finally:
+        stop.set()
+        release.set()
+        worker.join(timeout=1.0)
+
+
+def test_stale_gripper_still_publishes_fresh_arm_state() -> None:
+    from franka_ros2_bridge.bridge_node import FrankaBridgeNode
+    state = RobotState(
+        joints=(0.,) * 7, end_pose=EndPose((.4, 0., .3), (0., 0., 0., 1.)), gripper_width=.04,
+    )
+    node = SimpleNamespace(
+        _controller=SimpleNamespace(read_state=lambda: state, gripper_state_is_fresh=lambda: False),
+        _streaming=True, _state_error_logged=False, base_frame="panda_link0",
+        get_clock=lambda: SimpleNamespace(now=lambda: SimpleNamespace(to_msg=lambda: None)),
+        _joint_state_pub=MagicMock(), _end_pose_pub=MagicMock(), _gripper_state_pub=MagicMock(),
+    )
+    # Converters use actual ROS messages when ROS is installed.
+    import franka_ros2_bridge.bridge_node as module
+    if module.rclpy is None:
+        pytest.skip("ROS message constructors are unavailable")
+    from builtin_interfaces.msg import Time
+    node.get_clock = lambda: SimpleNamespace(now=lambda: SimpleNamespace(to_msg=lambda: Time()))
+    FrankaBridgeNode._publish_state(node)
+    node._joint_state_pub.publish.assert_called_once()
+    node._end_pose_pub.publish.assert_called_once()
+    node._gripper_state_pub.publish.assert_not_called()
 
 
 def test_joints_from_frankx_prefer_current_joint_positions() -> None:
