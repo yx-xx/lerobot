@@ -36,9 +36,6 @@ ip -details link show can0
 python examples/piper_x_to_franka/teleoperate.py
 ```
 
-
-
-
 ## 项目结构
 
 ```

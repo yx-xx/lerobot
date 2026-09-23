@@ -50,15 +50,15 @@ from lerobot.utils.visualization_utils import _init_rerun
 FPS = 30
 
 # 启动姿态锁定
-LOCK_FRANKA_STARTUP_ORIENTATION = False
+LOCK_FRANKA_STARTUP_ORIENTATION = True
 
 # 标定：Piper 末端工作空间，单位毫米，相对 Piper 基座。
-PIPER_X_MM = (130.0, 450.0)
+PIPER_X_MM = (150.0, 450.0)
 PIPER_Y_MM = (-290.0, 290.0)
 PIPER_Z_MM = (120.0, 500.0)
 
 # 标定：Franka 末端工作空间，单位米，相对 panda_link0。
-FRANKA_X_M = (0.30, 0.60)
+FRANKA_X_M = (0.40, 0.60)
 FRANKA_Y_M = (-0.35, 0.35)
 FRANKA_Z_M = (0.17, 0.60)
 
