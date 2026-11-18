@@ -134,7 +134,11 @@ def align_rotation_from_corresponding_poses(
     piper_rpy_deg: tuple[float, float, float],
     franka_quat_xyzw: tuple[float, float, float, float],
 ) -> Rotation:
-    """Build R_franka = R_align @ R_piper from one matching pair of poses."""
+    """Build the fixed tool offset in R_franka = R_piper @ R_tool_offset.
+
+    Piper and Franka base axes follow the same XYZ correspondence as position.
+    The reference pair accounts for different tool axes, not a base rotation.
+    """
     roll, pitch, yaw = piper_rpy_deg
     piper_ref = _rpy_zyx_to_rotation(
         roll=np.deg2rad(roll),
@@ -142,7 +146,7 @@ def align_rotation_from_corresponding_poses(
         yaw=np.deg2rad(yaw),
     )
     franka_ref = Rotation.from_quat(np.asarray(franka_quat_xyzw, dtype=float))
-    return franka_ref * piper_ref.inv()
+    return piper_ref.inv() * franka_ref
 
 
 def _require_finite(values: dict[str, float], keys: tuple[str, ...], label: str) -> None:
@@ -169,8 +173,10 @@ class MapPiperXEndposeToFrankaAction(RobotActionProcessorStep):
 
     Orientation uses one corresponding pose pair. When Piper is at
     ``piper_ref_rpy_deg``, Franka should be at ``franka_ref_quat_xyzw``. Later
-    poses keep that fixed frame offset:
-    ``R_franka = R_franka_ref @ R_piper_ref.inv() @ R_piper``.
+    poses apply the Piper base-frame rotation increment to the Franka reference:
+    ``R_franka = R_piper @ R_piper_ref.inv() @ R_franka_ref``.
+    Base XYZ axes correspond as in the position map. The right-hand constant
+    accounts for different tool axes without rotating the motion directions.
     """
 
     piper_xyz_mm: Box3
@@ -179,7 +185,7 @@ class MapPiperXEndposeToFrankaAction(RobotActionProcessorStep):
     gripper_m: AxisRange
     piper_ref_rpy_deg: tuple[float, float, float] = (0.0, 0.0, 0.0)
     franka_ref_quat_xyzw: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
-    _align: Rotation = field(init=False, repr=False)
+    _tool_offset: Rotation = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.piper_xyz_mm = _validate_box(self.piper_xyz_mm, "piper_xyz_mm")
@@ -190,7 +196,7 @@ class MapPiperXEndposeToFrankaAction(RobotActionProcessorStep):
         self.franka_ref_quat_xyzw = _finite_quat_xyzw(
             self.franka_ref_quat_xyzw, "franka_ref_quat_xyzw"
         )
-        self._align = align_rotation_from_corresponding_poses(
+        self._tool_offset = align_rotation_from_corresponding_poses(
             self.piper_ref_rpy_deg, self.franka_ref_quat_xyzw
         )
 
@@ -204,11 +210,12 @@ class MapPiperXEndposeToFrankaAction(RobotActionProcessorStep):
             )
             for index, axis in enumerate("xyz")
         ]
-        rotation = self._align * _rpy_zyx_to_rotation(
+        piper_rotation = _rpy_zyx_to_rotation(
             roll=np.deg2rad(float(action["endpose.roll"])),
             pitch=np.deg2rad(float(action["endpose.pitch"])),
             yaw=np.deg2rad(float(action["endpose.yaw"])),
         )
+        rotation = piper_rotation * self._tool_offset
         quat = rotation.as_quat()
         return {
             "end_pose.x": float(target_pos[0]),

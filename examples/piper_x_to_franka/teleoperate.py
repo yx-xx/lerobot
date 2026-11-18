@@ -50,7 +50,7 @@ from lerobot.utils.visualization_utils import _init_rerun
 FPS = 30
 
 # 启动姿态锁定
-LOCK_FRANKA_STARTUP_ORIENTATION = True
+LOCK_FRANKA_STARTUP_ORIENTATION = False
 
 # 标定：Piper 末端工作空间，单位毫米，相对 Piper 基座。
 PIPER_X_MM = (150.0, 450.0)
@@ -66,9 +66,15 @@ FRANKA_Z_M = (0.17, 0.60)
 PENDANT_MM = (51.0, 98.0)
 GRIPPER_M = (0.0045, 0.0846)
 
-# 标定：对应姿态。
-PIPER_REF_RPY_DEG = (-177.32, -3.01, -86.34)
-FRANKA_REF_QUAT_XYZW = (0.9997537578, -0.0156632982, 0.0147608992, 0.0054037621)
+# 标定：对应姿态。用同目录 calibrate_orientation.py 一次性采集后，一起替换这两个常量。
+# Piper 使用 RPY 角度；Franka 四元数顺序为 (qx, qy, qz, qw)。
+PIPER_REF_RPY_DEG = (-177.8787291384727, -3.2697089814813505, -84.67317794279184)
+FRANKA_REF_QUAT_XYZW = (
+    0.9992919885928564,
+    -0.03241738912274881,
+    0.00980888008203098,
+    0.016383537106962606,
+)
 
 
 def main() -> None:

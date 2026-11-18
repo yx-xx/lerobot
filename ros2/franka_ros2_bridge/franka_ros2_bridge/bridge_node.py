@@ -18,6 +18,7 @@ from franka_ros2_bridge.core.types import (
     DEFAULT_GRIPPER_MIN,
     DEFAULT_JOINT_LOWER_LIMITS,
     DEFAULT_JOINT_UPPER_LIMITS,
+    GripperCommand,
     JOINT_NAMES,
 )
 from franka_ros2_bridge.control.frankx_controller import FrankxController
@@ -78,6 +79,7 @@ class FrankaBridgeNode(Node):
         self.declare_parameter("gripper_min", DEFAULT_GRIPPER_MIN)
         self.declare_parameter("gripper_max", DEFAULT_GRIPPER_MAX)
         self.declare_parameter("gripper_speed", 0.04)
+        self.declare_parameter("gripper_force", 20.0)
         self.declare_parameter("cartesian_mode", "stream")
         self.declare_parameter("max_linear_velocity", 0.40)
         self.declare_parameter("max_linear_acceleration", 2.0)
@@ -182,6 +184,7 @@ class FrankaBridgeNode(Node):
                 initial_sync_scale=initial_sync_scale,
                 startup_ramp_sec=startup_ramp_sec,
                 gripper_speed=gripper_speed,
+                gripper_force=float(self.get_parameter("gripper_force").value),
                 gripper_poll_rate_hz=gripper_poll_rate_hz,
             )
         elif cartesian_mode == "ptp":
@@ -350,6 +353,9 @@ class FrankaBridgeNode(Node):
                     self.get_logger().error(f"Failed to update cartesian target: {exc}")
 
     def _gripper_worker_loop(self) -> None:
+        if self._streaming:
+            self._stream_gripper_worker_loop()
+            return
         while not self._stop_event.is_set():
             command = self._commands.take_gripper(wait_timeout_sec=0.1)
             if command is None:
@@ -368,6 +374,80 @@ class FrankaBridgeNode(Node):
                 self._last_gripper_command = command.width
             except Exception as exc:
                 self.get_logger().error(f"Gripper motion failed: {exc}")
+
+    def _stream_gripper_worker_loop(self) -> None:
+        """Keep receiving targets while grasp/move blocks; stop before replacing it."""
+        active: threading.Thread | None = None
+        finished = threading.Event()
+        errors: list[Exception] = []
+        pending: GripperCommand | None = None
+        interrupted = False
+
+        def execute(command: GripperCommand) -> None:
+            try:
+                self._controller.move_gripper(command)
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                finished.set()
+
+        try:
+            while not self._stop_event.is_set():
+                command = self._commands.take_gripper(wait_timeout_sec=0.02)
+                if command is not None:
+                    if self._commands.is_gripper_stale(command):
+                        self.get_logger().warning("Dropped stale gripper command")
+                    else:
+                        reference = pending.width if pending is not None else self._last_gripper_command
+                        if (
+                            pending is not None
+                            or reference is None
+                            or abs(command.width - reference) > self.gripper_command_deadband
+                        ):
+                            pending = command
+
+                if active is not None and finished.is_set():
+                    active.join()
+                    if errors and not interrupted:
+                        self.get_logger().error(f"Gripper motion failed: {errors[0]}")
+                        self._last_gripper_command = None
+                    active = None
+
+                if pending is None:
+                    continue
+                if active is not None:
+                    interrupted = True
+                    try:
+                        # Retry until the old call exits, including the race
+                        # where stop arrives just before grasp/move starts.
+                        self._controller.stop_gripper()
+                    except Exception as exc:
+                        self.get_logger().error(f"Failed to interrupt gripper: {exc}")
+                        pending = None
+                    continue
+                if self._commands.is_gripper_stale(pending):
+                    pending = None
+                    continue
+                if self._stop_event.is_set():
+                    break
+                finished.clear()
+                errors.clear()
+                interrupted = False
+                self._last_gripper_command = pending.width
+                active = threading.Thread(
+                    target=execute, args=(pending,), name="franka-gripper-motion", daemon=True
+                )
+                pending = None
+                active.start()
+        finally:
+            if active is not None and active.is_alive():
+                try:
+                    deadline = time.monotonic() + 2.0
+                    while active.is_alive() and time.monotonic() < deadline:
+                        self._controller.stop_gripper()
+                        active.join(timeout=0.02)
+                except Exception as exc:
+                    self.get_logger().error(f"Failed to stop gripper on shutdown: {exc}")
 
     def _publish_state(self) -> None:
         try:
@@ -478,12 +558,12 @@ class FrankaBridgeNode(Node):
     def destroy_node(self) -> bool:
         self._stop_event.set()
         self._commands.wake()
+        self._gripper_worker.join(timeout=2.0)
         try:
             self._controller.disconnect()
         except Exception:
             self.get_logger().exception("Failed to disconnect Franka controller")
         self._worker.join(timeout=2.0)
-        self._gripper_worker.join(timeout=2.0)
         return super().destroy_node()
 
 

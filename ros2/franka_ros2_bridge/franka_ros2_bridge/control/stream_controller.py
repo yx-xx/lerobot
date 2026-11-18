@@ -38,6 +38,7 @@ class StreamController:
         initial_sync_scale: float = 0.60,
         startup_ramp_sec: float = 0.30,
         gripper_speed: float = 0.04,
+        gripper_force: float = 20.0,
         gripper_poll_rate_hz: float = 2.0,
     ) -> None:
         if not robot_ip.strip():
@@ -70,6 +71,8 @@ class StreamController:
             raise ValueError("startup_ramp_sec must be in (0, 5]")
         if not 0.0 < gripper_speed <= 1.0:
             raise ValueError("gripper_speed must be in (0, 1]")
+        if not 0.0 < gripper_force <= 70.0:
+            raise ValueError("gripper_force must be in (0, 70]")
         if not 0.1 <= gripper_poll_rate_hz <= 50.0:
             raise ValueError("gripper_poll_rate_hz must be in [0.1, 50]")
         self._robot_ip = robot_ip
@@ -87,6 +90,9 @@ class StreamController:
         self._initial_sync_scale = initial_sync_scale
         self._startup_ramp_sec = startup_ramp_sec
         self._gripper_speed = gripper_speed
+        self._gripper_force = gripper_force
+        self._gripper_target_width: float | None = None
+        self._gripper_closing = False
         self._stream: Any | None = None
         self._gripper: Any | None = None
         self._gripper_lock = threading.Lock()
@@ -106,6 +112,11 @@ class StreamController:
                 "cartesian_stream native module is missing. On the Franka computer install "
                 "libfranka and pybind11, then rebuild without FRANKA_SKIP_STREAM_EXT=1."
             ) from exc
+        if not all(hasattr(GripperIO, method) for method in ("grasp", "stop")):
+            raise RuntimeError(
+                "GripperIO is outdated: rebuild franka_ros2_bridge on the Franka computer "
+                "to enable grasp and interruptible release."
+            )
         stream = CartesianStreamer(
             self._robot_ip,
             self._max_linear_velocity,
@@ -133,6 +144,8 @@ class StreamController:
             raise
         self._stream = stream
         self._gripper = gripper
+        self._gripper_target_width = None
+        self._gripper_closing = False
         self._last_gripper_width = width
         self._last_gripper_poll = time.monotonic()
         self._gripper_poll_errors = 0
@@ -218,8 +231,34 @@ class StreamController:
             gripper = self._gripper
             if gripper is None:
                 raise RuntimeError("StreamController is not connected")
-        if not gripper.move(float(command.width), self._gripper_speed):
-            raise RuntimeError("gripper move did not complete")
+            previous_target = self._gripper_target_width
+            if previous_target is None:
+                previous_target = self._last_gripper_width
+            # Use requested widths for direction: an object can keep the actual
+            # opening wider than both the closing target and a release target.
+            if command.width != previous_target:
+                self._gripper_closing = command.width < previous_target
+            closing = self._gripper_closing
+            self._gripper_target_width = command.width
+        # Release any previous holding force before changing the target.
+        if not gripper.stop():
+            raise RuntimeError("gripper stop did not complete")
+        if closing:
+            # Object width is unknown in teleoperation. Accept contact anywhere
+            # above the requested width, over the Panda's 80 mm opening range.
+            completed = gripper.grasp(
+                float(command.width), self._gripper_speed, self._gripper_force, 0.005, 0.08
+            )
+        else:
+            completed = gripper.move(float(command.width), self._gripper_speed)
+        if not completed:
+            raise RuntimeError(f"gripper {'grasp' if closing else 'move'} did not complete")
+
+    def stop_gripper(self) -> None:
+        with self._gripper_lock:
+            gripper = self._gripper
+        if gripper is not None and not gripper.stop():
+            raise RuntimeError("gripper stop did not complete")
 
     def _require_stream(self) -> Any:
         stream = self._stream

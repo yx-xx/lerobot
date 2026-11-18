@@ -11,12 +11,12 @@
 import math
 
 import numpy as np
+import pytest
 
 from lerobot.processor import TransitionKey
 from lerobot.processor.converters import create_transition
 from lerobot.teleoperators.piper_x.piper_x_processor import (
     MapPiperXEndposeToFrankaAction,
-    align_rotation_from_corresponding_poses,
     make_piper_x_to_franka_teleop_processor,
     map_calibrated_range,
 )
@@ -147,16 +147,35 @@ def test_corresponding_pose_maps_piper_ref_to_franka_ref():
     )
 
 
-def test_relative_piper_rotation_is_applied_after_alignment():
+def test_piper_base_frame_yaw_is_franka_base_frame_yaw():
     franka_ref = Rotation.from_rotvec(np.array([math.pi / 2.0, 0.0, 0.0]))
-    align = align_rotation_from_corresponding_poses((0.0, 0.0, 0.0), tuple(franka_ref.as_quat()))
     processor = _processor(franka_ref_quat_xyzw=tuple(franka_ref.as_quat()))
     mapped = _apply(processor, _piper_action(yaw=90.0))
-    expected = (align * Rotation.from_rotvec(np.array([0.0, 0.0, math.pi / 2.0]))).as_quat()
+    expected = (Rotation.from_rotvec(np.array([0.0, 0.0, math.pi / 2.0])) * franka_ref).as_quat()
     _assert_quat_close(
         [mapped["end_pose.qx"], mapped["end_pose.qy"], mapped["end_pose.qz"], mapped["end_pose.qw"]],
         expected,
     )
+
+
+@pytest.mark.parametrize(
+    ("roll", "pitch", "tilt_axis", "direction"),
+    [(170.0, 0.0, 0, -1.0), (190.0, 0.0, 0, 1.0), (180.0, 10.0, 1, 1.0), (180.0, -10.0, 1, -1.0)],
+    ids=["negative_x", "positive_x", "positive_y", "negative_y"],
+)
+def test_downward_tools_keep_same_tilt_direction_despite_reference_yaw(roll, pitch, tilt_axis, direction):
+    # Both tool Z axes point down, but their tool X/Y axes differ by 90 degrees.
+    processor = _processor(
+        piper_ref_rpy_deg=(180.0, 0.0, -90.0),
+        franka_ref_quat_xyzw=(1.0, 0.0, 0.0, 0.0),
+    )
+    mapped = _apply(processor, _piper_action(roll=roll, pitch=pitch, yaw=-90.0))
+    rotation = Rotation.from_quat(
+        np.array([mapped["end_pose.qx"], mapped["end_pose.qy"], mapped["end_pose.qz"], mapped["end_pose.qw"]])
+    )
+    expected_z = np.array([0.0, 0.0, -math.cos(math.radians(10.0))])
+    expected_z[tilt_axis] = direction * math.sin(math.radians(10.0))
+    np.testing.assert_allclose(rotation.apply(np.array([0.0, 0.0, 1.0])), expected_z, atol=1e-6)
 
 
 def test_mapping_does_not_depend_on_current_franka_pose():

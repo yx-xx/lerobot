@@ -227,6 +227,10 @@ class GripperIO {
   explicit GripperIO(const std::string& ip) : gripper_(ip) {}
   double width() { return gripper_.readOnce().width; }
   bool move(double width, double speed) { return gripper_.move(width, speed); }
+  bool grasp(double width, double speed, double force, double epsilon_inner, double epsilon_outer) {
+    return gripper_.grasp(width, speed, force, epsilon_inner, epsilon_outer);
+  }
+  bool stop() { return gripper_.stop(); }
 
  private:
   franka::Gripper gripper_;
@@ -825,7 +829,11 @@ PYBIND11_MODULE(cartesian_stream, m) {
   py::class_<GripperIO>(m, "GripperIO")
       .def(py::init<const std::string&>(), py::call_guard<py::gil_scoped_release>())
       .def("width", &GripperIO::width, py::call_guard<py::gil_scoped_release>())
-      .def("move", &GripperIO::move, py::call_guard<py::gil_scoped_release>());
+      .def("move", &GripperIO::move, py::call_guard<py::gil_scoped_release>())
+      .def("grasp", &GripperIO::grasp, py::arg("width"), py::arg("speed"), py::arg("force"),
+           py::arg("epsilon_inner") = 0.005, py::arg("epsilon_outer") = 0.08,
+           py::call_guard<py::gil_scoped_release>())
+      .def("stop", &GripperIO::stop, py::call_guard<py::gil_scoped_release>());
 
   py::class_<CartesianStreamer>(m, "CartesianStreamer")
       .def(py::init<std::string, double, double, double, double, double, double, double, double,
