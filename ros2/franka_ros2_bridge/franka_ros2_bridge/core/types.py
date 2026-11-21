@@ -12,6 +12,7 @@ DEFAULT_JOINT_LOWER_LIMITS = (-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.01
 DEFAULT_JOINT_UPPER_LIMITS = (2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973)
 DEFAULT_GRIPPER_MIN = 0.0
 DEFAULT_GRIPPER_MAX = 0.08
+DEFAULT_GRIPPER_SPEED = 0.10
 
 ControlMode = Literal["joint", "cartesian"]
 
@@ -50,10 +51,11 @@ class EndPoseCommand:
 
 @dataclass(frozen=True)
 class GripperCommand:
-    """Gripper opening in metres."""
+    """Opening in metres, with optional operator direction across skipped targets."""
 
     width: float
     received_at: float
+    closing: bool | None = None
 
 
 @dataclass(frozen=True)

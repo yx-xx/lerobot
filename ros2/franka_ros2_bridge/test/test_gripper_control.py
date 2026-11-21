@@ -27,9 +27,9 @@ def test_closing_grasps_and_opening_releases_even_below_object_width():
     controller.move_gripper(GripperCommand(0.08, time.monotonic()))
 
     assert gripper.mock_calls == [
-        call.stop(), call.grasp(0.005, 0.04, 15.0, 0.005, 0.08),
-        call.stop(), call.move(0.02, 0.04),
-        call.stop(), call.move(0.08, 0.04),
+        call.stop(), call.grasp(0.005, 0.10, 15.0, 0.005, 0.08),
+        call.stop(), call.move(0.02, 0.10),
+        call.stop(), call.move(0.08, 0.10),
     ]
 
 
@@ -72,13 +72,13 @@ def test_invalid_grasp_force_is_rejected(force):
         StreamController("172.16.0.2", gripper_force=force)
 
 
-def _worker_node(controller, deadband=0.001):
+def _worker_node(controller, deadband=0.001, *, queue=None):
     logger = MagicMock()
     node = SimpleNamespace(
         _controller=controller,
-        _commands=CommandQueue(2.0),
+        _commands=queue if queue is not None else CommandQueue(2.0),
         _stop_event=threading.Event(),
-        _last_gripper_command=None,
+        _last_gripper_command=0.04,
         gripper_command_deadband=deadband,
         get_logger=lambda: logger,
     )
@@ -213,6 +213,100 @@ def test_blocked_grasp_allows_arm_updates_and_can_be_released():
         assert not stopped.is_set()
         node._commands.push_gripper(GripperCommand(0.08, time.monotonic()))
         assert opened.wait(timeout=1.0)
+        logger.error.assert_not_called()
+    finally:
+        stopped.set()
+        _shutdown(node, worker)
+
+
+class _ObservedQueue(CommandQueue):
+    """Acknowledge a command once the worker starts its next iteration."""
+
+    def __init__(self):
+        super().__init__(2.0)
+        self._taken = None
+        self._processed = set()
+        self._processed_condition = threading.Condition()
+
+    def take_gripper(self, wait_timeout_sec=0.1):
+        if self._taken is not None:
+            with self._processed_condition:
+                self._processed.add(self._taken.received_at)
+                self._processed_condition.notify_all()
+        self._taken = super().take_gripper(wait_timeout_sec)
+        return self._taken
+
+    def send(self, width):
+        command = GripperCommand(width, time.monotonic())
+        self.push_gripper(command)
+        with self._processed_condition:
+            assert self._processed_condition.wait_for(
+                lambda: command.received_at in self._processed, timeout=1.0
+            ), "Gripper worker did not process the target"
+
+
+@pytest.mark.parametrize("widths", [(0.03, 0.02, 0.01), (0.05, 0.06, 0.08)])
+def test_same_direction_targets_do_not_interrupt_and_only_latest_runs(widths):
+    started, finish_first, followed = (threading.Event() for _ in range(3))
+    executed = []
+    queue = _ObservedQueue()
+
+    def move(command):
+        executed.append(command.width)
+        if len(executed) == 1:
+            started.set()
+            assert finish_first.wait(timeout=1.0)
+        else:
+            followed.set()
+
+    controller = SimpleNamespace(move_gripper=move, stop_gripper=MagicMock())
+    node, worker, logger = _worker_node(controller, queue=queue)
+    try:
+        queue.send(widths[0])
+        assert started.wait(timeout=1.0)
+        queue.send(widths[1])
+        queue.send(widths[2])
+        controller.stop_gripper.assert_not_called()
+        assert executed == [widths[0]]
+        finish_first.set()
+        assert followed.wait(timeout=1.0)
+        assert executed == [widths[0], widths[2]]
+        logger.error.assert_not_called()
+    finally:
+        finish_first.set()
+        _shutdown(node, worker)
+
+
+def test_reversal_of_pending_close_releases_below_active_grasp_target():
+    started, stopped, released = (threading.Event() for _ in range(3))
+    queue = _ObservedQueue()
+    controller = StreamController("172.16.0.2")
+    controller._last_gripper_width = 0.04
+
+    def grasp(*args):
+        started.set()
+        assert stopped.wait(timeout=1.0)
+        return False
+
+    def stop():
+        if started.is_set():
+            stopped.set()
+        return True
+
+    gripper = SimpleNamespace(
+        grasp=grasp, stop=stop, move=MagicMock(side_effect=lambda *args: released.set() or True)
+    )
+    controller._gripper = gripper
+    node, worker, logger = _worker_node(controller, queue=queue)
+    try:
+        queue.send(0.03)
+        assert started.wait(timeout=1.0)
+        queue.send(0.01)  # Keep closing; do not restart the active grasp.
+        queue.send(0.0105)  # Sub-deadband noise must not look like a reversal.
+        assert not stopped.is_set()
+        queue.send(0.02)  # Open relative to the pending target, below the active target.
+        assert released.wait(timeout=1.0)
+        gripper.move.assert_called_once_with(0.02, controller._gripper_speed)
         logger.error.assert_not_called()
     finally:
         stopped.set()

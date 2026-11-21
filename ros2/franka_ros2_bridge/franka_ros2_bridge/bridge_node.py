@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import threading
 import time
+from dataclasses import replace
 from typing import Any, Sequence
 
 from franka_ros2_bridge.core.command_queue import CommandQueue
@@ -16,6 +17,7 @@ from franka_ros2_bridge.core.safety import (
 from franka_ros2_bridge.core.types import (
     DEFAULT_GRIPPER_MAX,
     DEFAULT_GRIPPER_MIN,
+    DEFAULT_GRIPPER_SPEED,
     DEFAULT_JOINT_LOWER_LIMITS,
     DEFAULT_JOINT_UPPER_LIMITS,
     GripperCommand,
@@ -78,7 +80,7 @@ class FrankaBridgeNode(Node):
         self.declare_parameter("gripper_cmd_topic", "/franka/gripper_cmd")
         self.declare_parameter("gripper_min", DEFAULT_GRIPPER_MIN)
         self.declare_parameter("gripper_max", DEFAULT_GRIPPER_MAX)
-        self.declare_parameter("gripper_speed", 0.04)
+        self.declare_parameter("gripper_speed", DEFAULT_GRIPPER_SPEED)
         self.declare_parameter("gripper_force", 20.0)
         self.declare_parameter("cartesian_mode", "stream")
         self.declare_parameter("max_linear_velocity", 0.40)
@@ -199,10 +201,10 @@ class FrankaBridgeNode(Node):
         else:
             raise ValueError("cartesian_mode must be 'stream' or 'ptp'")
         self._controller.connect()
-        self._controller.read_state()
+        initial_state = self._controller.read_state()
         self._state_error_logged = False
         self._controller_fault = threading.Event()
-        self._last_gripper_command: float | None = None
+        self._last_gripper_command: float | None = initial_state.gripper_width
         self._last_delayed_callbacks = 0
         self._last_target_messages = 0
         self._ros_target_messages = 0
@@ -376,11 +378,14 @@ class FrankaBridgeNode(Node):
                 self.get_logger().error(f"Gripper motion failed: {exc}")
 
     def _stream_gripper_worker_loop(self) -> None:
-        """Keep receiving targets while grasp/move blocks; stop before replacing it."""
+        """Coalesce same-direction targets; interrupt immediately on reversal."""
         active: threading.Thread | None = None
         finished = threading.Event()
         errors: list[Exception] = []
         pending: GripperCommand | None = None
+        last_requested_width = self._last_gripper_command
+        requested_closing: bool | None = None
+        active_closing: bool | None = None
         interrupted = False
 
         def execute(command: GripperCommand) -> None:
@@ -390,6 +395,7 @@ class FrankaBridgeNode(Node):
                 errors.append(exc)
             finally:
                 finished.set()
+                self._commands.wake()
 
         try:
             while not self._stop_event.is_set():
@@ -400,22 +406,40 @@ class FrankaBridgeNode(Node):
                     else:
                         reference = pending.width if pending is not None else self._last_gripper_command
                         if (
-                            pending is not None
-                            or reference is None
+                            reference is None
                             or abs(command.width - reference) > self.gripper_command_deadband
                         ):
-                            pending = command
+                            if last_requested_width is not None and (
+                                abs(command.width - last_requested_width) > self.gripper_command_deadband
+                            ):
+                                requested_closing = command.width < last_requested_width
+                            last_requested_width = command.width
+                            pending = replace(command, closing=requested_closing)
+                        elif pending is not None:
+                            # Refresh an unchanged target without letting input
+                            # noise reverse its direction or restart the motion.
+                            pending = replace(pending, received_at=command.received_at)
 
                 if active is not None and finished.is_set():
                     active.join()
                     if errors and not interrupted:
                         self.get_logger().error(f"Gripper motion failed: {errors[0]}")
                         self._last_gripper_command = None
+                        last_requested_width = None
+                        requested_closing = None
                     active = None
 
                 if pending is None:
                     continue
                 if active is not None:
+                    if (
+                        not interrupted
+                        and active_closing is not None
+                        and pending.closing == active_closing
+                    ):
+                        # Let a same-direction step finish instead of braking
+                        # and restarting on every 30 Hz teleoperation target.
+                        continue
                     interrupted = True
                     try:
                         # Retry until the old call exits, including the race
@@ -434,6 +458,7 @@ class FrankaBridgeNode(Node):
                 errors.clear()
                 interrupted = False
                 self._last_gripper_command = pending.width
+                active_closing = pending.closing
                 active = threading.Thread(
                     target=execute, args=(pending,), name="franka-gripper-motion", daemon=True
                 )
@@ -515,6 +540,7 @@ class FrankaBridgeNode(Node):
             f"trajectory_sync_fallbacks={int(diagnostics['trajectory_sync_fallbacks'])} "
             f"position_error_mm={1000.0 * float(diagnostics['position_error']):.1f} "
             f"orientation_error_deg={math.degrees(float(diagnostics['orientation_error'])):.1f} "
+            f"orientation_limited={int(bool(diagnostics.get('orientation_limited', False)))} "
             f"target_hz={target_rate:.1f} target_age_ms={target_age_ms:.1f} "
             f"ros_hz={ros_rate:.1f} ros_max_gap_ms={ros_gap_ms:.1f} "
             f"dispatch_ms={self._dispatch_delay_ms:.1f} "
@@ -525,6 +551,7 @@ class FrankaBridgeNode(Node):
         if (
             success_rate < 0.99
             or target_is_stale
+            or bool(diagnostics.get("orientation_limited", False))
             or not self._controller.gripper_state_is_fresh()
         ):
             self.get_logger().warning(message)

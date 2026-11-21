@@ -8,6 +8,7 @@ from typing import Any
 
 from franka_ros2_bridge.core.safety import validate_robot_state_joints
 from franka_ros2_bridge.core.types import (
+    DEFAULT_GRIPPER_SPEED,
     EndPose,
     EndPoseCommand,
     GripperCommand,
@@ -54,7 +55,7 @@ class FrankxController:
         velocity_rel: float = 0.15,
         acceleration_rel: float = 0.1,
         jerk_rel: float = 0.1,
-        gripper_speed: float = 0.04,
+        gripper_speed: float = DEFAULT_GRIPPER_SPEED,
     ) -> None:
         if (
             not 0.0 < velocity_rel <= 1.0

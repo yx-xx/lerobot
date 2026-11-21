@@ -27,6 +27,7 @@
 #include <pybind11/stl.h>
 
 #include "cartesian_tracking.h"
+#include "cartesian_ik.h"
 #include "joint_limits.h"
 
 namespace py = pybind11;
@@ -54,12 +55,6 @@ struct RobotSnapshot {
   double control_command_success_rate{};
 };
 
-constexpr std::array<double, 7> kJointLowerLimits{
-    -2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973};
-constexpr std::array<double, 7> kJointUpperLimits{
-    2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973};
-constexpr double kJointLimitBuffer = 0.05;
-constexpr double kJointLimitSlowdownRange = 0.15;
 
 class AtomicPoseBuffer {
  public:
@@ -254,7 +249,8 @@ class CartesianStreamer {
         tracker_({max_linear_velocity, max_linear_acceleration, max_linear_jerk},
                  {max_angular_velocity, max_angular_acceleration, max_angular_jerk},
                  tracking_frequency_hz, linear_deadband, angular_deadband,
-                 initial_sync_scale, startup_ramp_sec) {
+                 initial_sync_scale, startup_ramp_sec),
+        orientation_limiter_({max_angular_velocity, max_angular_acceleration, max_angular_jerk}) {
     if (ip_.empty()) {
       throw std::invalid_argument("robot ip must not be empty");
     }
@@ -300,6 +296,7 @@ class CartesianStreamer {
     active_target_ = commanded_;
     target_.store(commanded_);
     tracker_.reset(commanded_);
+    orientation_limiter_.reset();
     previous_jacobian_valid_ = false;
     state_.store(state, commanded_);
     posture_reference_ = state.q_d;
@@ -320,6 +317,7 @@ class CartesianStreamer {
     trajectory_sync_fallbacks_.store(0, std::memory_order_relaxed);
     position_error_.store(0.0, std::memory_order_relaxed);
     orientation_error_.store(0.0, std::memory_order_relaxed);
+    orientation_limited_.store(false, std::memory_order_relaxed);
     singular_value_cycle_ = 0;
     startup_state_.store(0, std::memory_order_relaxed);
     first_command_sent_ = false;
@@ -442,6 +440,7 @@ class CartesianStreamer {
         diagnostics["trajectory_sync_fallbacks"] = trajectory_sync_fallbacks_.load(std::memory_order_relaxed);
         diagnostics["position_error"] = position_error_.load(std::memory_order_relaxed);
         diagnostics["orientation_error"] = orientation_error_.load(std::memory_order_relaxed);
+        diagnostics["orientation_limited"] = orientation_limited_.load(std::memory_order_relaxed);
         const std::uint64_t last_target_ns =
             last_target_message_ns_.load(std::memory_order_relaxed);
         const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -582,8 +581,6 @@ class CartesianStreamer {
   }
 
   PseudoInverse inverse_jacobian(const Jacobian& jacobian) {
-    using Matrix6 = Eigen::Matrix<double, 6, 6>;
-    const Matrix6 gram = jacobian * jacobian.transpose();
     double minimum_singular_value =
         minimum_singular_value_.load(std::memory_order_relaxed);
     if (singular_value_cycle_ == 0) {
@@ -593,53 +590,27 @@ class CartesianStreamer {
     }
     singular_value_cycle_ = (singular_value_cycle_ + 1) % 10;
 
-    const double damping = jacobian_damping(minimum_singular_value);
-    const Matrix6 regularized = gram + damping * damping * Matrix6::Identity();
-    const Eigen::LDLT<Matrix6> decomposition(regularized);
-    if (decomposition.info() != Eigen::Success) {
-      throw std::runtime_error("failed to solve damped Cartesian Jacobian");
-    }
-    return jacobian.transpose() * decomposition.solve(Matrix6::Identity());
+    return position_priority_inverse(jacobian, jacobian_damping(minimum_singular_value));
   }
 
   std::array<double, 7> resolved_joint_velocity(const franka::RobotState& state,
                                                 const std::array<double, 6>& twist,
                                                 const Jacobian& jacobian,
                                                 const PseudoInverse& pseudo_inverse) {
-    using Matrix7 = Eigen::Matrix<double, 7, 7>;
     const Eigen::Map<const Vector6> desired_twist(twist.data());
-    Vector7 desired_joint_velocity = pseudo_inverse * desired_twist;
-
+    const Eigen::Map<const Vector7> accepted_velocity(state.dq_d.data());
+    Vector7 posture_velocity = Vector7::Zero();
     if (lock_elbow_) {
-      Vector7 posture_velocity = Vector7::Zero();
-      posture_velocity(2) = -0.8 * (state.q[2] - posture_reference_[2]);
-      desired_joint_velocity +=
-          (Matrix7::Identity() - pseudo_inverse * jacobian) * posture_velocity;
+      posture_velocity(2) = -0.8 * (state.q_d[2] - posture_reference_[2]);
     }
-
-    double velocity_scale = 1.0;
-    for (std::size_t i = 0; i < 7; ++i) {
-      const double speed = std::abs(desired_joint_velocity(static_cast<Eigen::Index>(i)));
-      if (speed > kJointVelocityLimits[i]) {
-        velocity_scale = std::min(velocity_scale, kJointVelocityLimits[i] / speed);
-      }
-
-      const double velocity = desired_joint_velocity(static_cast<Eigen::Index>(i));
-      const double lower_boundary = kJointLowerLimits[i] + kJointLimitBuffer;
-      const double upper_boundary = kJointUpperLimits[i] - kJointLimitBuffer;
-      if (velocity > 0.0 && state.q[i] > upper_boundary - kJointLimitSlowdownRange) {
-        velocity_scale = std::min(
-            velocity_scale,
-            std::clamp((upper_boundary - state.q[i]) / kJointLimitSlowdownRange, 0.0, 1.0));
-      } else if (velocity < 0.0 && state.q[i] < lower_boundary + kJointLimitSlowdownRange) {
-        velocity_scale = std::min(
-            velocity_scale,
-            std::clamp((state.q[i] - lower_boundary) / kJointLimitSlowdownRange, 0.0, 1.0));
-      }
-    }
-    joint_velocity_scale_.store(velocity_scale, std::memory_order_relaxed);
+    const Vector7 desired_joint_velocity = cartesian_joint_velocity(
+        jacobian, pseudo_inverse, accepted_velocity, desired_twist, posture_velocity);
 
     std::array<double, 7> desired{};
+    Eigen::Map<Vector7>(desired.data()) = desired_joint_velocity;
+    const double velocity_scale = joint_velocity_scale(state.q, desired);
+    joint_velocity_scale_.store(velocity_scale, std::memory_order_relaxed);
+
     for (std::size_t i = 0; i < desired.size(); ++i) {
       desired[i] = velocity_scale * desired_joint_velocity(static_cast<Eigen::Index>(i));
     }
@@ -749,6 +720,8 @@ class CartesianStreamer {
     matrix_to_pose(model_->pose(franka::Frame::kEndEffector, state.q_d,
                                 state.F_T_EE, state.EE_T_K), &accepted_pose);
     const PseudoInverse inverse = inverse_jacobian(jacobian);
+    tracker_.set_target(orientation_limiter_.constrain(accepted_pose, active_target_, inverse, state.q_d, state.dq_d));
+    orientation_limited_.store(orientation_limiter_.limited(), std::memory_order_relaxed);
     const Twist allocation = tracker_.axis_allocation(accepted_pose, accepted_velocity,
                                                       accepted_acceleration);
     const DynamicScale dynamics = allocate_joint_dynamics(
@@ -785,6 +758,7 @@ class CartesianStreamer {
   int control_cpu_;
   double initial_sync_scale_;
   AbsolutePoseTracker tracker_;
+  OrientationTargetLimiter orientation_limiter_;
   Jacobian previous_jacobian_ = Jacobian::Zero();
   bool previous_jacobian_valid_{false};
   std::unique_ptr<franka::Robot> robot_;
@@ -819,6 +793,7 @@ class CartesianStreamer {
   std::atomic<unsigned> trajectory_sync_fallbacks_{0};
   std::atomic<double> position_error_{0.0};
   std::atomic<double> orientation_error_{0.0};
+  std::atomic<bool> orientation_limited_{false};
   bool first_command_sent_{false};
   std::uint32_t singular_value_cycle_{0};
 };

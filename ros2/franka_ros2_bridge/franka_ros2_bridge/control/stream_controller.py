@@ -9,6 +9,7 @@ from typing import Any
 
 from franka_ros2_bridge.core.safety import validate_robot_state_joints
 from franka_ros2_bridge.core.types import (
+    DEFAULT_GRIPPER_SPEED,
     EndPose,
     EndPoseCommand,
     GripperCommand,
@@ -37,7 +38,7 @@ class StreamController:
         control_cpu: int = 4,
         initial_sync_scale: float = 0.60,
         startup_ramp_sec: float = 0.30,
-        gripper_speed: float = 0.04,
+        gripper_speed: float = DEFAULT_GRIPPER_SPEED,
         gripper_force: float = 20.0,
         gripper_poll_rate_hz: float = 2.0,
     ) -> None:
@@ -236,7 +237,9 @@ class StreamController:
                 previous_target = self._last_gripper_width
             # Use requested widths for direction: an object can keep the actual
             # opening wider than both the closing target and a release target.
-            if command.width != previous_target:
+            if command.closing is not None:
+                self._gripper_closing = command.closing
+            elif command.width != previous_target:
                 self._gripper_closing = command.width < previous_target
             closing = self._gripper_closing
             self._gripper_target_width = command.width

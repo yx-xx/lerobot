@@ -52,6 +52,7 @@ def cartesian_stream_extension() -> list[Extension]:
             "franka_ros2_bridge.cartesian_stream",
             sources=[stream_source, *ruckig_sources],
             depends=[source_file("cartesian_tracking.h"), source_file("joint_limits.h"),
+                     source_file("cartesian_ik.h"),
                      os.path.join(source_root, "setup.py")]
             + sorted(glob(os.path.join(ruckig_root, "include", "ruckig", "*.hpp"))),
             include_dirs=include_dirs

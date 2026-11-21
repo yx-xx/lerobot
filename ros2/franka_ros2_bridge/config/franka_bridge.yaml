@@ -75,7 +75,8 @@ franka_bridge:
     gripper_cmd_topic: "/franka/gripper_cmd"
     gripper_min: 0.0
     gripper_max: 0.08
-    gripper_speed: 0.04
+    # 遥操作开合速度，0.10 m/s；同方向目标合并，反向时立即打断。
+    gripper_speed: 0.10
     # stream 模式：闭合使用 grasp，抓取力单位 N；张开先 stop 解除保持，再 move。
     gripper_force: 20.0
     # 后台独立读取夹爪状态，原生 I/O 释放 GIL；ROS 状态回调只读缓存，不等待网络。

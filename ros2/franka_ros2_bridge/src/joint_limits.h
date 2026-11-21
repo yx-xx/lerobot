@@ -4,6 +4,14 @@
 
 namespace franka_bridge {
 
+constexpr std::array<double, 7> kJointLowerLimits{
+    -2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973};
+constexpr std::array<double, 7> kJointUpperLimits{
+    2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973};
+constexpr double kJointLimitBuffer = 0.05;
+constexpr double kJointLimitSlowdownRange = 0.15;
+
+
 // These stay below libfranka's limits so the bridge, rather than the robot
 // reflex, controls the joint-space dynamics produced by resolved-rate IK.
 constexpr std::array<double, 7> kJointVelocityLimits{
@@ -12,6 +20,25 @@ constexpr std::array<double, 7> kJointAccelerationLimits{
     6.0, 3.0, 4.0, 5.0, 6.0, 8.0, 8.0};
 constexpr std::array<double, 7> kJointJerkLimits{
     300.0, 150.0, 200.0, 250.0, 300.0, 400.0, 400.0};
+
+inline double joint_velocity_scale(const std::array<double, 7>& position,
+                                   const std::array<double, 7>& velocity) {
+  double scale = 1.0;
+  for (std::size_t i = 0; i < 7; ++i) {
+    const double speed = std::abs(velocity[i]);
+    if (speed > kJointVelocityLimits[i]) {
+      scale = std::min(scale, kJointVelocityLimits[i] / speed);
+    }
+    const double lower = kJointLowerLimits[i] + kJointLimitBuffer;
+    const double upper = kJointUpperLimits[i] - kJointLimitBuffer;
+    if (velocity[i] > 0.0 && position[i] > upper - kJointLimitSlowdownRange) {
+      scale = std::min(scale, std::clamp((upper - position[i]) / kJointLimitSlowdownRange, 0.0, 1.0));
+    } else if (velocity[i] < 0.0 && position[i] < lower + kJointLimitSlowdownRange) {
+      scale = std::min(scale, std::clamp((position[i] - lower) / kJointLimitSlowdownRange, 0.0, 1.0));
+    }
+  }
+  return scale;
+}
 
 inline double jacobian_damping(double minimum_singular_value) {
   const double proximity = std::clamp((.10 - minimum_singular_value) / .10, 0.0, 1.0);

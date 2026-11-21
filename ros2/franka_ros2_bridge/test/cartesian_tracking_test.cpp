@@ -1,5 +1,6 @@
 #include "cartesian_tracking.h"
 #include "joint_limits.h"
+#include "cartesian_ik.h"
 #include <Eigen/Dense>
 
 #include <cassert>
@@ -303,6 +304,7 @@ struct PandaPlant {
 struct PandaSimulation {
   PandaPlant plant;
   AbsolutePoseTracker tracker;
+  OrientationTargetLimiter orientation_limiter;
   PandaPlant::J last_jacobian;
   double elbow, maximum_joint_speed = 0.0;
 
@@ -319,11 +321,7 @@ struct PandaSimulation {
     const auto& jacobian = plant.jacobian;
     const double sigma = Eigen::JacobiSVD<PandaPlant::J>(jacobian).singularValues().minCoeff();
     const double damping = jacobian_damping(sigma);
-    using Matrix6 = Eigen::Matrix<double,6,6>;
-    const Matrix6 regularized = jacobian * jacobian.transpose() + damping * damping * Matrix6::Identity();
-    const Eigen::LDLT<Matrix6> decomposition(regularized);
-    require(decomposition.info() == Eigen::Success, "Jacobian solve failed");
-    const auto inverse = (jacobian.transpose() * decomposition.solve(Matrix6::Identity())).eval();
+    const auto inverse = position_priority_inverse(jacobian, damping);
     const Eigen::Map<const Eigen::Matrix<double,7,1>> dq(plant.dq.data()), ddq(plant.ddq.data());
     const Eigen::Matrix<double,6,1> velocity = jacobian * dq;
     const Eigen::Matrix<double,6,1> curvature = (jacobian - last_jacobian) * dq / .001;
@@ -331,16 +329,21 @@ struct PandaSimulation {
     Twist v{}, acc{};
     Eigen::Map<Eigen::Matrix<double,6,1>>(v.data()) = velocity;
     Eigen::Map<Eigen::Matrix<double,6,1>>(acc.data()) = acceleration;
+    const Pose raw_target = tracker.raw_target();
+    tracker.set_target(orientation_limiter.constrain(plant.pose, raw_target, inverse, plant.q, plant.dq));
     const auto weights = tracker.axis_allocation(plant.pose, v, acc);
     const auto limits = allocate_joint_dynamics(inverse, weights, {.4,2.,12.}, {.8,4.,25.});
     auto twist = tracker.step(plant.pose, v, acc, limits);
+    tracker.set_target(raw_target);
     for (std::size_t i = 0; i < 6; ++i) twist[i] -= .001 * curvature[i];
     Eigen::Matrix<double,7,1> posture = Eigen::Matrix<double,7,1>::Zero();
     posture(2) = -.8 * (plant.q[2] - elbow);
-    const Eigen::Matrix<double,7,1> desired = inverse * Eigen::Map<const Eigen::Matrix<double,6,1>>(twist.data()) +
-        (Eigen::Matrix<double,7,7>::Identity() - inverse * jacobian) * posture;
+    const JointVector desired = cartesian_joint_velocity(
+        jacobian, inverse, dq, Eigen::Map<const Eigen::Matrix<double,6,1>>(twist.data()), posture);
     std::array<double,7> requested{};
     Eigen::Map<Eigen::Matrix<double,7,1>>(requested.data()) = desired;
+    const double scale = joint_velocity_scale(plant.q, requested);
+    for (double& value : requested) value *= scale;
     const auto next = franka::limitRate(kJointVelocityLimits, kJointAccelerationLimits, kJointJerkLimits,
                                         requested, plant.dq, plant.ddq);
     for (std::size_t i = 0; i < 7; ++i) {
@@ -433,6 +436,106 @@ void test_joint_moving() {
   std::cout << "joint_moving: peak_error_m=" << peak_error
             << " peak_rotation_error_rad=" << peak_rotation_error << "\n";
 }
+void test_large_orientation() {
+  double peak_position = 0.;
+  for (int axis : {0, 1}) {
+    for (double direction : {-1., 1.}) {
+      PandaSimulation sim;
+      const Pose start = sim.plant.pose;
+      Pose goal = start;
+      double run_peak_position = 0., peak_rotation = 0.;
+      bool ever_limited = false;
+      for (int cycle = 0; cycle < 12000; ++cycle) {
+        if (cycle % 33 == 0) {
+          const double time = cycle * .001;
+          const double fraction = time < 6. ? std::min(time / 3., 1.) :
+              std::max(0., 1. - (time - 6.) / 3.);
+          const double angle = direction * kPi / 2. * fraction;
+          double delta[4] = {0., 0., 0., std::cos(angle / 2.)};
+          delta[axis] = std::sin(angle / 2.);
+          quaternion_multiply(delta, start.q, goal.q);
+          // The same physical quaternion may change sign in an upstream conversion.
+          if ((cycle / 33) % 2) for (double& value : goal.q) value = -value;
+          sim.tracker.set_target(goal);
+        }
+        sim.step();
+        ever_limited = ever_limited || sim.orientation_limiter.limited();
+        peak_rotation = std::max(peak_rotation, quaternion_distance(sim.plant.pose.q, start.q));
+        if (!(axis == 1 && direction < 0.) && cycle == 5500) {
+          require(quaternion_distance(sim.plant.pose.q, goal.q) < .011,
+                  "a feasible 90 degree orientation was not reached");
+        }
+        run_peak_position = std::max(run_peak_position, distance(sim.plant.pose, start));
+        for (std::size_t joint = 0; joint < 7; ++joint) {
+          require(sim.plant.q[joint] >= kJointLowerLimits[joint] &&
+                  sim.plant.q[joint] <= kJointUpperLimits[joint],
+                  "90 degree orientation motion exceeded a joint position limit");
+        }
+      }
+      std::cout << "axis=" << axis << " direction=" << direction
+                << " peak_position_m=" << run_peak_position
+                << " peak_rotation_rad=" << peak_rotation << " limited=" << ever_limited
+                << " final_rotation_error=" << quaternion_distance(sim.plant.pose.q, start.q) << "\n";
+      require(peak_rotation > .1, "orientation tracking was disabled instead of constrained");
+      if (axis == 1 && direction < 0.) require(ever_limited, "joint boundary did not constrain orientation");
+      require(!sim.orientation_limiter.limited(), "orientation limit did not clear after returning");
+      peak_position = std::max(peak_position, run_peak_position);
+      require(quaternion_distance(sim.plant.pose.q, start.q) < .011,
+              "90 degree orientation reversal did not recover");
+    }
+  }
+  require(peak_position < .002, "large orientation change displaced the held XYZ position by 2 mm");
+}
+
+void test_orientation_position_priority() {
+  CartesianJacobian jacobian = CartesianJacobian::Zero();
+  jacobian.leftCols<6>().setIdentity();
+  // This weak angular direction shares a joint with X translation.
+  jacobian(3, 0) = 1.;
+  jacobian(3, 3) = .001;
+  const auto inverse = position_priority_inverse(jacobian, .12);
+  Eigen::Matrix<double, 6, 1> requested = Eigen::Matrix<double, 6, 1>::Zero();
+  requested(3) = .8;
+  auto actual = (jacobian * inverse * requested).eval();
+  require(actual.head<3>().norm() < 1e-10, "orientation damping moved the requested XYZ position");
+  requested.head<3>() << .01, -.02, .03;
+  actual = jacobian * inverse * requested;
+  require((actual.head<3>() - requested.head<3>()).norm() < 1e-10,
+          "weak orientation overrode translation tracking");
+}
+
+void test_accepted_velocity() {
+  CartesianJacobian jacobian = CartesianJacobian::Zero();
+  jacobian.leftCols<6>().setIdentity();
+  jacobian(3, 0) = 1.;
+  jacobian(3, 3) = .001;
+  const CartesianInverse inverse = position_priority_inverse(jacobian, .12);
+  const JointVector accepted = .05 * jacobian.row(3).transpose();
+  const Eigen::Matrix<double, 6, 1> requested = jacobian * accepted;
+  const JointVector next = cartesian_joint_velocity(jacobian, inverse, accepted, requested,
+                                                    JointVector::Zero());
+  require((next - accepted).norm() < 1e-12, "damping repeatedly attenuated an accepted task velocity");
+}
+
+void test_posture_nullspace() {
+  PandaPlant plant;
+  double maximum_residual = 0.;
+  for (double elbow : {-.8, -.05, .4}) {
+    for (double wrist : {.01, .5, 2.2, 3.5}) {
+      plant.q[2] = elbow;
+      plant.q[5] = wrist;
+      plant.forward();
+      JointVector posture = JointVector::Zero();
+      posture(2) = .4;
+      const JointVector projected = project_posture_velocity(plant.jacobian, posture);
+      maximum_residual = std::max(maximum_residual, (plant.jacobian * projected).norm());
+      require(projected.allFinite(), "posture projection was not finite");
+      require(projected.norm() <= posture.norm() + 1e-12, "posture projection amplified joint speed");
+    }
+  }
+  std::cout << "posture Cartesian residual=" << maximum_residual << "\n";
+  require(maximum_residual < 1e-10, "elbow posture command leaked into end-effector motion");
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -454,6 +557,10 @@ int main(int argc, char** argv) {
     else if (scenario == "reported_posture") test_reported_posture();
     else if (scenario == "zero_deadband") test_reported_posture(true);
     else if (scenario == "joint_moving") test_joint_moving();
+    else if (scenario == "large_orientation") test_large_orientation();
+    else if (scenario == "orientation_position_priority") test_orientation_position_priority();
+    else if (scenario == "accepted_velocity") test_accepted_velocity();
+    else if (scenario == "posture_nullspace") test_posture_nullspace();
     else throw std::runtime_error("unknown scenario");
     std::cout << scenario << " PASS\n";
   } catch (const std::exception& error) {

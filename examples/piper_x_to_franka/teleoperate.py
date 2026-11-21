@@ -58,7 +58,7 @@ PIPER_Y_MM = (-290.0, 290.0)
 PIPER_Z_MM = (120.0, 500.0)
 
 # 标定：Franka 末端工作空间，单位米，相对 panda_link0。
-FRANKA_X_M = (0.40, 0.60)
+FRANKA_X_M = (0.35, 0.70)
 FRANKA_Y_M = (-0.35, 0.35)
 FRANKA_Z_M = (0.17, 0.60)
 
