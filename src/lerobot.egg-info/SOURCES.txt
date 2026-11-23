@@ -216,6 +216,7 @@ src/lerobot/teleoperators/phone/teleop_phone.py
 src/lerobot/teleoperators/piper_x/__init__.py
 src/lerobot/teleoperators/piper_x/configuration_piper_x.py
 src/lerobot/teleoperators/piper_x/piper_x.py
+src/lerobot/teleoperators/piper_x/piper_x_processor.py
 src/lerobot/teleoperators/reachy2_teleoperator/__init__.py
 src/lerobot/teleoperators/reachy2_teleoperator/config_reachy2_teleoperator.py
 src/lerobot/teleoperators/reachy2_teleoperator/reachy2_teleoperator.py

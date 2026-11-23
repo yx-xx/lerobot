@@ -439,6 +439,9 @@ target_age_ms=12.0
 | `dispatch_ms` | 最近一次目标从 ROS 回调到 C++ 的排队时间 | 通常数毫秒以内 |
 | `gripper_age_ms` | 最近有效夹爪观测的年龄 | 2 Hz 轮询时通常小于 500 ms |
 | `gripper_poll_errors` | 夹爪后台读取失败的累计次数 | 正常为 0 |
+| `gripper_pending_ms` | 当前待执行开合请求在工作线程中的累计等待时间，重复目标不清零 | 持续超过 250 ms 时记录日志 |
+| `gripper_request_wait_ms` | 最近一次开始执行的开合请求在工作线程中累计等候的时间 | 与 `gripper_pending_ms` 一起判断排队延迟 |
+| `gripper_stop_ms` | 最近一次中断旧夹爪动作时 `stop()` 的耗时 | 明显增大时检查 SDK 停止确认与网络 |
 | `target_age_ms` | 最新目标距离现在的时间 | 通常小于 50 ms |
 
 注意：`max_period_ms` 是启动以来最大值，不会自动下降；判断当前是否还在抖动，应看

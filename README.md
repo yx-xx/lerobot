@@ -23,6 +23,7 @@ pip install scipy==1.15.3
 
 ```bash
 conda activate lerobotx
+cd /home/pc108/project/lerobot
 
 source /opt/ros/humble/setup.bash
 export ROS_DOMAIN_ID=23
@@ -30,8 +31,6 @@ export ROS_DOMAIN_ID=23
 sudo ip link set can0 down
 sudo ip link set can0 type can bitrate 1000000
 sudo ip link set can0 up
-
-ip -details link show can0
 
 python examples/piper_x_to_franka/teleoperate.py
 ```

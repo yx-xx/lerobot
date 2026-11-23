@@ -87,7 +87,7 @@ def _worker_node(controller, deadband=0.001, *, queue=None, retarget_interval=0.
     logger = MagicMock()
     node = SimpleNamespace(
         _controller=controller,
-        _commands=queue if queue is not None else CommandQueue(2.0),
+        _commands=queue if queue is not None else CommandQueue(2.0, gripper_deadband=deadband),
         _stop_event=threading.Event(),
         _last_gripper_command=0.04,
         gripper_command_deadband=deadband,
@@ -399,4 +399,130 @@ def test_reversal_of_pending_close_releases_below_active_grasp_target():
         logger.error.assert_not_called()
     finally:
         stopped.set()
+        _shutdown(node, worker)
+
+
+def test_mailbox_keeps_release_direction_when_intermediate_close_is_overwritten():
+    queue = CommandQueue(2.0)
+    queue.push_gripper(GripperCommand(0.03, time.monotonic()))
+    queue.take_gripper(0.0)
+    # The worker is busy stopping an SDK call and cannot consume these samples.
+    queue.push_gripper(GripperCommand(0.005, time.monotonic()))
+    queue.push_gripper(GripperCommand(0.02, time.monotonic()))
+    queue.push_gripper(GripperCommand(0.02, time.monotonic()))
+    command = queue.take_gripper(0.0)
+    assert command.width == 0.02
+    assert command.closing is False
+
+
+def test_worker_obeys_release_intent_below_last_executed_target():
+    started, stopped, released = (threading.Event() for _ in range(3))
+    executed = []
+
+    def move(command):
+        executed.append(command)
+        if len(executed) == 1:
+            started.set()
+            assert stopped.wait(timeout=1.0)
+        else:
+            released.set()
+
+    node, worker, logger = _worker_node(
+        SimpleNamespace(move_gripper=move, stop_gripper=stopped.set)
+    )
+    try:
+        node._commands.push_gripper(GripperCommand(0.03, time.monotonic()))
+        assert started.wait(timeout=1.0)
+        # A 5 mm close was coalesced upstream; opening to 20 mm is a release,
+        # even though it is below the old 30 mm execution target.
+        node._commands.push_gripper(GripperCommand(0.02, time.monotonic(), closing=False))
+        assert released.wait(timeout=1.0)
+        assert executed[-1].closing is False
+        logger.error.assert_not_called()
+    finally:
+        stopped.set()
+        _shutdown(node, worker)
+
+
+@pytest.mark.parametrize("samples", [
+    (0.04, 0.01, 0.02, 0.0204, 0.0198),
+    (0.04, 0.01, 0.0104, 0.0108, 0.0112),
+])
+def test_mailbox_filters_noise_but_accumulates_slow_release(samples):
+    queue = CommandQueue(2.0)
+    for width in samples:
+        queue.push_gripper(GripperCommand(width, time.monotonic()))
+    assert queue.take_gripper(0.0).closing is False
+
+
+def test_mailbox_uses_configured_deadband_for_small_reversals():
+    queue = CommandQueue(2.0, gripper_deadband=0.0)
+    for width in (0.04, 0.01, 0.0101):
+        queue.push_gripper(GripperCommand(width, time.monotonic()))
+    assert queue.take_gripper(0.0).closing is False
+
+
+@pytest.mark.parametrize("deadband", [-0.001, float("nan"), float("inf")])
+def test_mailbox_rejects_invalid_gripper_deadband(deadband):
+    with pytest.raises(ValueError, match="gripper_deadband"):
+        CommandQueue(2.0, gripper_deadband=deadband)
+
+
+def test_release_direction_is_honoured_even_near_old_target():
+    started, stopped, released = (threading.Event() for _ in range(3))
+    executed = []
+
+    def move(command):
+        executed.append(command)
+        if len(executed) == 1:
+            started.set()
+            assert stopped.wait(timeout=1.0)
+        else:
+            released.set()
+
+    node, worker, logger = _worker_node(
+        SimpleNamespace(move_gripper=move, stop_gripper=stopped.set)
+    )
+    try:
+        node._commands.push_gripper(GripperCommand(0.03, time.monotonic()))
+        assert started.wait(timeout=1.0)
+        node._commands.push_gripper(GripperCommand(0.0305, time.monotonic(), closing=False))
+        assert released.wait(timeout=1.0)
+        assert executed[-1].closing is False
+        logger.error.assert_not_called()
+    finally:
+        stopped.set()
+        _shutdown(node, worker)
+
+
+def test_duplicate_targets_do_not_hide_gripper_pending_time():
+    started, finish_first, followed = (threading.Event() for _ in range(3))
+    queue = _ObservedQueue()
+    executed = []
+
+    def move(command):
+        executed.append(command)
+        if len(executed) == 1:
+            started.set()
+            assert finish_first.wait(timeout=1.0)
+        else:
+            followed.set()
+
+    controller = SimpleNamespace(move_gripper=move, stop_gripper=MagicMock())
+    node, worker, _ = _worker_node(controller, queue=queue)
+    try:
+        queue.send(0.03)
+        assert started.wait(timeout=1.0)
+        queue.send(0.0285)  # Below the 2 mm same-direction retarget threshold.
+        pending_since = node._gripper_pending_since
+        assert pending_since > 0.0
+        queue.send(0.0285)
+        assert node._gripper_pending_since == pending_since
+        controller.stop_gripper.assert_not_called()
+        finish_first.set()
+        assert followed.wait(timeout=1.0)
+        assert node._gripper_request_wait_ms >= 0.0
+        assert node._gripper_pending_since == 0.0
+    finally:
+        finish_first.set()
         _shutdown(node, worker)
