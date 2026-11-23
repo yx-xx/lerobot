@@ -96,8 +96,11 @@ class FrankaBridgeNode(Node):
         self.declare_parameter("control_cpu", 4)
         self.declare_parameter("initial_sync_scale", 0.60)
         self.declare_parameter("startup_ramp_sec", 0.30)
+        self.declare_parameter("position_boundary_guard", True)
         self.declare_parameter("gripper_command_deadband", 0.001)
-        self.declare_parameter("gripper_poll_rate_hz", 2.0)
+        self.declare_parameter("gripper_retarget_interval_sec", 0.10)
+        self.declare_parameter("gripper_retarget_deadband", 0.002)
+        self.declare_parameter("gripper_poll_rate_hz", 20.0)
 
         self.base_frame = str(self.get_parameter("base_frame").value)
         self.command_timeout = float(self.get_parameter("command_timeout_sec").value)
@@ -130,15 +133,24 @@ class FrankaBridgeNode(Node):
         control_cpu = int(self.get_parameter("control_cpu").value)
         initial_sync_scale = float(self.get_parameter("initial_sync_scale").value)
         startup_ramp_sec = float(self.get_parameter("startup_ramp_sec").value)
+        position_boundary_guard = bool(self.get_parameter("position_boundary_guard").value)
         gripper_poll_rate_hz = float(self.get_parameter("gripper_poll_rate_hz").value)
         self.gripper_command_deadband = float(
             self.get_parameter("gripper_command_deadband").value
         )
+        self.gripper_retarget_interval_sec = float(
+            self.get_parameter("gripper_retarget_interval_sec").value
+        )
+        self.gripper_retarget_deadband = float(self.get_parameter("gripper_retarget_deadband").value)
 
         if rate <= 0.0 or self.command_timeout <= 0.0:
             raise ValueError("publish_rate_hz and command_timeout_sec must be positive")
         if not math.isfinite(self.gripper_command_deadband) or self.gripper_command_deadband < 0.0:
             raise ValueError("gripper_command_deadband must be finite and non-negative")
+        if not math.isfinite(self.gripper_retarget_interval_sec) or self.gripper_retarget_interval_sec <= 0.0:
+            raise ValueError("gripper_retarget_interval_sec must be finite and positive")
+        if not math.isfinite(self.gripper_retarget_deadband) or self.gripper_retarget_deadband < 0.0:
+            raise ValueError("gripper_retarget_deadband must be finite and non-negative")
         if (
             len(self.joint_lower_limits) != len(JOINT_NAMES)
             or len(self.joint_upper_limits) != len(JOINT_NAMES)
@@ -185,6 +197,7 @@ class FrankaBridgeNode(Node):
                 control_cpu=control_cpu,
                 initial_sync_scale=initial_sync_scale,
                 startup_ramp_sec=startup_ramp_sec,
+                position_boundary_guard=position_boundary_guard,
                 gripper_speed=gripper_speed,
                 gripper_force=float(self.get_parameter("gripper_force").value),
                 gripper_poll_rate_hz=gripper_poll_rate_hz,
@@ -212,6 +225,8 @@ class FrankaBridgeNode(Node):
         self._last_ros_target_time = 0.0
         self._ros_max_gap_ms = 0.0
         self._dispatch_delay_ms = 0.0
+        self._gripper_dispatch_delay_ms = 0.0
+        self._gripper_last_motion_ms = 0.0
         self._last_startup_state = 0
         self._last_diagnostics_time = time.monotonic()
         if self._streaming:
@@ -378,7 +393,7 @@ class FrankaBridgeNode(Node):
                 self.get_logger().error(f"Gripper motion failed: {exc}")
 
     def _stream_gripper_worker_loop(self) -> None:
-        """Coalesce same-direction targets; interrupt immediately on reversal."""
+        """Retarget large changes at a bounded rate; reverse immediately."""
         active: threading.Thread | None = None
         finished = threading.Event()
         errors: list[Exception] = []
@@ -387,13 +402,17 @@ class FrankaBridgeNode(Node):
         requested_closing: bool | None = None
         active_closing: bool | None = None
         interrupted = False
+        active_started_at = 0.0
 
         def execute(command: GripperCommand) -> None:
+            started_at = time.monotonic()
+            self._gripper_dispatch_delay_ms = 1000.0 * (started_at - command.received_at)
             try:
                 self._controller.move_gripper(command)
             except Exception as exc:
                 errors.append(exc)
             finally:
+                self._gripper_last_motion_ms = 1000.0 * (time.monotonic() - started_at)
                 finished.set()
                 self._commands.wake()
 
@@ -431,15 +450,23 @@ class FrankaBridgeNode(Node):
 
                 if pending is None:
                     continue
+                if self._commands.is_gripper_stale(pending):
+                    pending = None
+                    continue
                 if active is not None:
                     if (
                         not interrupted
                         and active_closing is not None
                         and pending.closing == active_closing
                     ):
-                        # Let a same-direction step finish instead of braking
-                        # and restarting on every 30 Hz teleoperation target.
-                        continue
+                        # Small extensions can finish naturally. A large change
+                        # must not wait indefinitely for a blocking grasp/move.
+                        difference = abs(pending.width - self._last_gripper_command)
+                        if (
+                            difference < self.gripper_retarget_deadband
+                            or time.monotonic() - active_started_at < self.gripper_retarget_interval_sec
+                        ):
+                            continue
                     interrupted = True
                     try:
                         # Retry until the old call exits, including the race
@@ -449,9 +476,6 @@ class FrankaBridgeNode(Node):
                         self.get_logger().error(f"Failed to interrupt gripper: {exc}")
                         pending = None
                     continue
-                if self._commands.is_gripper_stale(pending):
-                    pending = None
-                    continue
                 if self._stop_event.is_set():
                     break
                 finished.clear()
@@ -459,6 +483,7 @@ class FrankaBridgeNode(Node):
                 interrupted = False
                 self._last_gripper_command = pending.width
                 active_closing = pending.closing
+                active_started_at = time.monotonic()
                 active = threading.Thread(
                     target=execute, args=(pending,), name="franka-gripper-motion", daemon=True
                 )
@@ -541,17 +566,21 @@ class FrankaBridgeNode(Node):
             f"position_error_mm={1000.0 * float(diagnostics['position_error']):.1f} "
             f"orientation_error_deg={math.degrees(float(diagnostics['orientation_error'])):.1f} "
             f"orientation_limited={int(bool(diagnostics.get('orientation_limited', False)))} "
+            f"position_limited={int(bool(diagnostics.get('position_limited', False)))} "
             f"target_hz={target_rate:.1f} target_age_ms={target_age_ms:.1f} "
             f"ros_hz={ros_rate:.1f} ros_max_gap_ms={ros_gap_ms:.1f} "
             f"dispatch_ms={self._dispatch_delay_ms:.1f} "
             f"gripper_age_ms={float(diagnostics['gripper_age_ms']):.1f} "
-            f"gripper_poll_errors={int(diagnostics['gripper_poll_errors'])}"
+            f"gripper_poll_errors={int(diagnostics['gripper_poll_errors'])} "
+            f"gripper_dispatch_ms={self._gripper_dispatch_delay_ms:.1f} "
+            f"gripper_motion_ms={self._gripper_last_motion_ms:.1f}"
         )
         target_is_stale = target_messages > 0 and target_age_ms > 200.0
         if (
             success_rate < 0.99
             or target_is_stale
             or bool(diagnostics.get("orientation_limited", False))
+            or bool(diagnostics.get("position_limited", False))
             or not self._controller.gripper_state_is_fresh()
         ):
             self.get_logger().warning(message)

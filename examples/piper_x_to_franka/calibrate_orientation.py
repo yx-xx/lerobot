@@ -11,7 +11,7 @@
 """一次性采集 Piper-X / Franka 对应姿态，打印供遥操作使用的固定常量。
 
 先按 teleoperate.py 的说明准备 ROS 2、CAN 和 Franka 桥接器，停掉遥操作程序。
-Franka 预先摆到参考姿态，再运行：
+Franka 预先摆到参考姿态（固定模式下希望保持的朝下姿态），再运行：
 
     python examples/piper_x_to_franka/calibrate_orientation.py
 
@@ -46,7 +46,8 @@ def main() -> None:
         print("\n把下面两行一起替换到 examples/piper_x_to_franka/teleoperate.py：")
         print(f"PIPER_REF_RPY_DEG = {piper_rpy!r}")
         print(f"FRANKA_REF_QUAT_XYZW = {franka_quat!r}")
-        print("将 LOCK_FRANKA_STARTUP_ORIENTATION 改为 False 后启用姿态遥操作。")
+        print("固定模式会直接保持 FRANKA_REF_QUAT_XYZW；请将 Franka 摆到希望保持的朝下姿态再采集。")
+        print("将 FRANKA_FIXED_QUAT_XYZW 设为 None 后才启用姿态遥操作。")
     except KeyboardInterrupt:
         print("\n已取消采集。")
     finally:

@@ -30,8 +30,8 @@ Then:
 
     python examples/piper_x_to_franka/teleoperate.py
 
-Position is a cuboid-to-cuboid map. Orientation mapping remains calibrated, but
-can be temporarily disabled so Franka keeps the orientation measured at startup.
+Position is a cuboid-to-cuboid map. For position-only collection, orientation
+is fixed at the calibrated downward Franka pose, independently of the startup pose.
 """
 
 import math
@@ -49,8 +49,8 @@ from lerobot.utils.visualization_utils import _init_rerun
 
 FPS = 30
 
-# 启动姿态锁定
-LOCK_FRANKA_STARTUP_ORIENTATION = False
+# 每轴 1.5 mm 的目标死区；抑制静止/映射边缘噪声，移动累计超过死区后继续跟随。
+POSITION_DEADBAND_M = 0.0015
 
 # 标定：Piper 末端工作空间，单位毫米，相对 Piper 基座。
 PIPER_X_MM = (150.0, 450.0)
@@ -58,13 +58,14 @@ PIPER_Y_MM = (-290.0, 290.0)
 PIPER_Z_MM = (120.0, 500.0)
 
 # 标定：Franka 末端工作空间，单位米，相对 panda_link0。
-FRANKA_X_M = (0.35, 0.70)
+FRANKA_X_M = (0.35, 0.80)
 FRANKA_Y_M = (-0.35, 0.35)
 FRANKA_Z_M = (0.17, 0.60)
 
 # 标定：示教器开口（毫米）→ Franka 夹爪开口（米）。
 PENDANT_MM = (51.0, 98.0)
-GRIPPER_M = (0.0045, 0.0846)
+# 与 Franka 客户端和桥接器的 80 mm 上限一致，避免全开后的闭合输入先被截断。
+GRIPPER_M = (0.0045, 0.08)
 
 # 标定：对应姿态。用同目录 calibrate_orientation.py 一次性采集后，一起替换这两个常量。
 # Piper 使用 RPY 角度；Franka 四元数顺序为 (qx, qy, qz, qw)。
@@ -75,6 +76,10 @@ FRANKA_REF_QUAT_XYZW = (
     0.00980888008203098,
     0.016383537106962606,
 )
+
+# 标定时的 Franka 姿态就是实际夹爪朝下的姿态；固定模式直接复用整组四元数。
+# 保留标定时的完整朝向，包括夹爪绕竖直方向的转角。设为 None 才恢复主臂姿态跟随。
+FRANKA_FIXED_QUAT_XYZW = FRANKA_REF_QUAT_XYZW
 
 
 def main() -> None:
@@ -88,6 +93,7 @@ def main() -> None:
         state_timeout_s=3.0,
         max_relative_translation=0.15,
         max_relative_rotation=math.radians(30.0),
+        qos_depth=1,
     )
     teleop = make_teleoperator_from_config(teleop_config)
     robot = FrankaRobot(robot_config)
@@ -98,18 +104,10 @@ def main() -> None:
         gripper_m=GRIPPER_M,
         piper_ref_rpy_deg=PIPER_REF_RPY_DEG,
         franka_ref_quat_xyzw=FRANKA_REF_QUAT_XYZW,
+        fixed_franka_quat_xyzw=FRANKA_FIXED_QUAT_XYZW,
+        position_deadband_m=POSITION_DEADBAND_M,
     )
     quaternion_keys = ("end_pose.qx", "end_pose.qy", "end_pose.qz", "end_pose.qw")
-    fixed_quaternion: tuple[float, float, float, float] | None = None
-
-    def teleop_action_processor(data):
-        if fixed_quaternion is None:
-            raise RuntimeError("Franka startup orientation has not been read")
-        action = mapped_action_processor(data)
-        if LOCK_FRANKA_STARTUP_ORIENTATION:
-            for key, value in zip(quaternion_keys, fixed_quaternion):
-                action[key] = value
-        return action
 
     _, robot_action_processor, robot_observation_processor = make_default_processors()
 
@@ -118,22 +116,24 @@ def main() -> None:
         robot.connect()
         initial_observation = robot.get_observation()
         initial_position = tuple(float(initial_observation[f"end_pose.{axis}"]) for axis in "xyz")
-        fixed_quaternion = tuple(float(initial_observation[key]) for key in quaternion_keys)
+        startup_quaternion = tuple(float(initial_observation[key]) for key in quaternion_keys)
         print(f"Franka startup XYZ (m): {initial_position}")
-        print(f"Franka startup quaternion XYZW: {fixed_quaternion}")
-        if LOCK_FRANKA_STARTUP_ORIENTATION:
-            print("Franka startup orientation is locked for this run.")
+        print(f"Franka startup quaternion XYZW: {startup_quaternion}")
+        if FRANKA_FIXED_QUAT_XYZW is not None:
+            print(f"Position-only mode: calibrated downward quaternion XYZW = {FRANKA_FIXED_QUAT_XYZW}")
         print(f"Connecting Piper-X on {teleop_config.can_name}. Keep dragging the arm until connected.")
         teleop.connect()
         print("Connected. Cuboid map Piper -> Franka. Ctrl+C to stop.")
 
-        _init_rerun(session_name="piper_x_to_franka_teleop")
+        display_data = os.environ.get("TELEOP_DISPLAY_DATA", "0") == "1"
+        if display_data:
+            _init_rerun(session_name="piper_x_to_franka_teleop")
         teleop_loop(
             teleop=teleop,
             robot=robot,
             fps=FPS,
-            display_data=True,
-            teleop_action_processor=teleop_action_processor,
+            display_data=display_data,
+            teleop_action_processor=mapped_action_processor,
             robot_action_processor=robot_action_processor,
             robot_observation_processor=robot_observation_processor,
         )

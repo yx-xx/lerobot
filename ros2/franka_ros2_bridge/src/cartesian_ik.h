@@ -57,6 +57,63 @@ inline JointVector project_posture_velocity(const CartesianJacobian& jacobian,
   return direction * direction.dot(posture);
 }
 
+// A cuboid of XYZ targets includes combinations that cannot be reached at a
+// fixed orientation. Stop at one feasible position before joint slowdown or a
+// deteriorating singularity distorts the Cartesian motion. Retreating past the
+// held position releases the latch; noise on an outward target cannot release it.
+class PositionTargetLimiter {
+ public:
+  explicit PositionTargetLimiter(MotionLimits linear = {.4, 2., 12.})
+      : braking_horizon_(linear.velocity / linear.acceleration + linear.acceleration / linear.jerk) {}
+
+  void reset() { limited_ = false; previous_sigma_ = 0.; }
+  bool limited() const { return limited_; }
+
+  Pose constrain(const Pose& current, const Pose& target, const CartesianInverse& inverse,
+                 const std::array<double, 7>& position, const std::array<double, 7>& velocity,
+                 const Twist& cartesian_velocity, double minimum_sigma) {
+    Eigen::Vector3d error;
+    for (std::size_t axis = 0; axis < 3; ++axis) error[axis] = target.p[axis] - current.p[axis];
+    // Leave braking room before the .10 Jacobian damping band. Waiting until
+    // damping is strong can leave too little Cartesian braking authority.
+    const bool approaching_singularity = minimum_sigma < .12 && minimum_sigma < previous_sigma_ - 1e-8;
+    previous_sigma_ = minimum_sigma;
+    if (limited_) {
+      Eigen::Vector3d retreat;
+      for (std::size_t axis = 0; axis < 3; ++axis) retreat[axis] = target.p[axis] - hold_.p[axis];
+      if (retreat.dot(blocked_direction_) < -.005) limited_ = false;
+    }
+    if (!limited_ && error.norm() > .001) {
+      const JointVector direction = inverse.leftCols<3>() * error;
+      for (std::size_t joint = 0; joint < 7; ++joint) {
+        const double braking = .03 + braking_horizon_ * std::abs(velocity[joint]);
+        const double lower = kJointLowerLimits[joint] + kJointLimitBuffer + kJointLimitSlowdownRange + braking;
+        const double upper = kJointUpperLimits[joint] - kJointLimitBuffer - kJointLimitSlowdownRange - braking;
+        limited_ = limited_ || (position[joint] <= lower && direction[joint] < -1e-6) ||
+                              (position[joint] >= upper && direction[joint] > 1e-6);
+      }
+      // On retreat, velocity initially still points outwards while braking.
+      // Do not re-latch a singularity guard that is moving away from the target.
+      const Eigen::Map<const Eigen::Vector3d> translation_velocity(cartesian_velocity.data());
+      limited_ = limited_ || (approaching_singularity && translation_velocity.dot(error) > 1e-8);
+      if (limited_) {
+        hold_ = current;
+        blocked_direction_ = error.normalized();
+      }
+    }
+    Pose constrained = target;
+    if (limited_) std::copy(hold_.p, hold_.p + 3, constrained.p);
+    return constrained;
+  }
+
+ private:
+  double braking_horizon_;
+  double previous_sigma_{0.};
+  bool limited_{false};
+  Pose hold_{};
+  Eigen::Vector3d blocked_direction_ = Eigen::Vector3d::Zero();
+};
+
 class OrientationTargetLimiter {
  public:
   explicit OrientationTargetLimiter(MotionLimits angular = {.8, 4., 25.})

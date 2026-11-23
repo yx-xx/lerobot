@@ -10,18 +10,51 @@
 仅在 `cartesian_mode: ptp` 时使用。
 
 流式模式中，示教器目标开口减小时使用 `grasp()` 带力抓取，`gripper_force` 默认 20 N；
-目标开口增大时先 `stop()` 解除保持，再 `move()` 张开。开合意图按前后两次目标开口判断，
+目标开口增大时按需 `stop()` 解除抓取保持，再 `move()` 张开。开合意图按前后两次目标开口判断，
 因此物体挡住夹爪、实际开口大于目标值时，仍能正确识别释放操作。
 抓取宽度容差允许在目标开口以上接触物体，适用于遥操作时物体宽度未知的情况。
-夹爪开合速度 `gripper_speed` 默认 `0.10 m/s`。同方向连续目标只保留最新开口，
-当前动作完成后立即接续，避免每帧目标都触发停止和重启；反向开合会立即中断旧动作，
-待旧调用退出后执行最新目标。开合方向按收到的目标变化保留，即使中间目标被合并，
+夹爪开合速度 `gripper_speed` 默认 `0.10 m/s`。同方向连续目标只保留最新开口；
+与正在执行的目标相差至少 `gripper_retarget_deadband=0.002 m` 时，运行满
+`gripper_retarget_interval_sec=0.10 s` 即请求打断并更新，不再无限等待旧阻塞调用完成。
+小变化等当前动作完成后接续，避免每帧目标都触发停止和重启。反向开合立即请求中断，
+待旧调用退出后执行最新目标；已经打断的动作不再额外重复 `stop()`。
+此处 100 ms 是同向更新的调度间隔，不是包含 SDK 停止确认、网络和机械动作的延迟保证。
+开合方向按收到的目标变化保留，即使中间目标被合并，
 物体挡住夹爪时仍能识别松开操作。重复目标和小幅噪声由死区过滤。
-`gripper_poll_rate_hz` 只控制状态读取频率，不限制目标接收和夹爪执行速度。
+`gripper_poll_rate_hz` 默认 20 Hz，降低显示和数据采集中的状态滞后；它不限制运动指令速度。
+`gripper_dispatch_ms` 是最新命令从 ROS 接收到开始执行的等待时间，
+`gripper_motion_ms` 是最近完成的 SDK 调用耗时（包含等待或被打断），二者均不是实测机械起动延迟。
 
 夹爪修复同时修改了 Python 和 C++ 原生接口。更新时将完整包同步到 Franka 控制机，
 按下文步骤重新 `colcon build`，再重启桥接器。若启动报 `GripperIO is outdated`，说明仍在
-加载旧扩展；仅重启主臂遥操作脚本不足以应用此次更新。
+加载旧扩展。`CartesianStreamer is outdated` 则表示原生扩展尚不包含位置边界制动。
+仅重启主臂遥操作脚本不足以应用此次更新。
+
+## 固定朝下的位置遥操作
+
+`examples/piper_x_to_franka/teleoperate.py` 默认使用
+`FRANKA_FIXED_QUAT_XYZW = FRANKA_REF_QUAT_XYZW`，保持标定时实际摆好的 Franka 朝下姿态，
+四元数顺序为 `(qx, qy, qz, qw)`，包括标定时夹爪绕竖直方向的转角。
+更新标定常量会同步更新固定姿态目标。启动时的任意姿态和主臂的转动均不会改变该目标。
+控制器仍按旋转动态限制平滑到达目标姿态。
+将此常量设为 `None` 才恢复原有姿态标定和跟随；届时也应将桥接配置中的
+`position_boundary_guard` 设为 `false`，单独验证完整姿态的工作空间。
+位置映射保留 X `[0.35, 0.70]`、Y `[-0.35, 0.35]`、Z `[0.17, 0.60]` m，
+每轴增加 1.5 mm 的目标死区；小幅变化相对保持的目标累计，不会让慢速移动一直被滤掉。
+夹爪映射上限对齐实际接口的 80 mm；旧的 84.6 mm 映射会被客户端截断，
+使示教器从全开开始合拢时出现一段不改变机器人目标的空行程。
+默认关闭逐帧可视化，避免影响 30 Hz 指令循环；需要时设置 `TELEOP_DISPLAY_DATA=1`。
+录制程序复用 `make_piper_x_to_franka_teleop_processor` 时也应传入
+`fixed_franka_quat_xyzw=FRANKA_REF_QUAT_XYZW` 和 `position_deadband_m=0.0015`，
+以便记录与遥操作一致的固定姿态动作。
+
+矩形工作空间并不意味着所有组合角落都可在固定姿态下到达。当前固定姿态配置启用
+`position_boundary_guard: true`。原生控制器在关节接近边界，
+或 Jacobian 最小奇异值下降到 0.12 以下且仍朝目标运动时，提前制动并保持一个固定 XYZ 目标，
+不再持续追逐外侧目标。日志 `position_limited=1` 表示位置边界保护生效；
+主臂映射目标沿被阻挡方向退回保持点内侧至少 5 mm 后解除。该保护可能提前限制组合角落，
+不是全工作空间的可达性证明，也不是路径规划器。部署后先检查目标/实测位姿与边界保持效果，
+再开始正式采集。
 
 ## 控制机每次启动
 
@@ -98,7 +131,7 @@ Eigen3、`-lfranka` 和 colcon 编译输出。
 - 冗余姿态保持：`lock_elbow`（在 Jacobian 零空间中保持启动时的第三关节姿态）
 - 启动限制渐变：`initial_sync_scale: 0.60`，在 `startup_ramp_sec: 0.30` 秒内平滑恢复完整限制
 - 实时线程 CPU：`control_cpu`（本机默认 CPU 4，`-1` 表示允许迁移）
-- 夹爪状态轮询：`gripper_poll_rate_hz`（默认 2 Hz，后台更新缓存，不阻塞 ROS 回调）
+- 夹爪状态轮询：`gripper_poll_rate_hz`（默认 20 Hz，后台更新缓存，不阻塞 ROS 回调）
 
 命令话题使用 `KEEP_LAST(1)`，每次只追踪最新目标，避免遥操作链路短暂拥塞后回放旧指令。
 
@@ -160,7 +193,8 @@ ros2 launch franka_ros2_bridge franka_bridge.launch.py
 ```
 
 遥操作脚本默认关闭 Rerun 和逐帧数据显示，避免干扰 30 Hz 指令循环。需要调试显示时显式设置
-`TELEOP_DISPLAY_DATA=1`。主臂端末端和夹爪发布者也使用 `BEST_EFFORT + KEEP_LAST(1)`。
+`TELEOP_DISPLAY_DATA=1`。该脚本的主臂端 ROS 队列深度为 1；桥接端命令订阅使用
+`BEST_EFFORT + KEEP_LAST(1)`。
 若主臂运行在另一台电脑，需要同步 LeRobot 的 `src/lerobot/robots/franka/franka.py`、
 `src/lerobot/teleoperate.py` 和 `examples/piper_x_to_franka/teleoperate.py`；仅更新控制机不能
 改变远端发布者。Piper-X 到 Franka 仍使用绝对工作空间映射，不计算接管偏移。

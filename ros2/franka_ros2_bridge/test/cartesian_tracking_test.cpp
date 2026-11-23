@@ -8,6 +8,7 @@
 #include <deque>
 #include <iostream>
 #include <string>
+#include <vector>
 
 using namespace franka_bridge;
 
@@ -305,11 +306,14 @@ struct PandaSimulation {
   PandaPlant plant;
   AbsolutePoseTracker tracker;
   OrientationTargetLimiter orientation_limiter;
+  PositionTargetLimiter position_limiter;
   PandaPlant::J last_jacobian;
   double elbow, maximum_joint_speed = 0.0;
+  bool position_boundary_guard;
 
-  explicit PandaSimulation(double deadband = .001)
-      : tracker{{.4,2.,12.}, {.8,4.,25.}, 5., deadband, deadband == 0.0 ? 0.0 : .01, .6, .3} {
+  explicit PandaSimulation(double deadband = .001, bool guard = false)
+      : tracker{{.4,2.,12.}, {.8,4.,25.}, 5., deadband, deadband == 0.0 ? 0.0 : .01, .6, .3},
+        position_boundary_guard(guard) {
     plant.forward();
     tracker.reset(plant.pose);
     last_jacobian = plant.jacobian;
@@ -330,7 +334,9 @@ struct PandaSimulation {
     Eigen::Map<Eigen::Matrix<double,6,1>>(v.data()) = velocity;
     Eigen::Map<Eigen::Matrix<double,6,1>>(acc.data()) = acceleration;
     const Pose raw_target = tracker.raw_target();
-    tracker.set_target(orientation_limiter.constrain(plant.pose, raw_target, inverse, plant.q, plant.dq));
+    const Pose position_target = position_boundary_guard ?
+        position_limiter.constrain(plant.pose, raw_target, inverse, plant.q, plant.dq, v, sigma) : raw_target;
+    tracker.set_target(orientation_limiter.constrain(plant.pose, position_target, inverse, plant.q, plant.dq));
     const auto weights = tracker.axis_allocation(plant.pose, v, acc);
     const auto limits = allocate_joint_dynamics(inverse, weights, {.4,2.,12.}, {.8,4.,25.});
     auto twist = tracker.step(plant.pose, v, acc, limits);
@@ -487,6 +493,66 @@ void test_large_orientation() {
   require(peak_position < .002, "large orientation change displaced the held XYZ position by 2 mm");
 }
 
+void test_fixed_downward(bool boundary) {
+  for (const std::array<double, 3>& endpoint : (boundary ?
+       std::vector<std::array<double, 3>>{{.70, -.35, .60}, {.70, .35, .60}} :
+       std::vector<std::array<double, 3>>{{.70, 0., .30}, {.65, .30, .30},
+                                       {.70, .35, .17}, {.35, -.35, .17}, {.35, 0., .60}})) {
+    PandaSimulation sim(.001, true);
+    Pose goal = sim.plant.pose;
+    // Measured downward reference used by examples/piper_x_to_franka/teleoperate.py (XYZW).
+    goal.q[0] = 0.9992919885928564;
+    goal.q[1] = -0.03241738912274881;
+    goal.q[2] = 0.00980888008203098;
+    goal.q[3] = 0.016383537106962606;
+    for (int cycle = 0; cycle < 4000; ++cycle) {
+      sim.tracker.set_target(goal);
+      sim.step();
+    }
+    require(quaternion_distance(sim.plant.pose.q, goal.q) < .001, "downward startup failed");
+    const Pose start = sim.plant.pose;
+    std::copy(endpoint.begin(), endpoint.end(), goal.p);
+    Pose held{};
+    double hold_drift = 0., peak_angle = 0.;
+    bool ever_limited = false;
+    for (int cycle = 0; cycle < 12000; ++cycle) {
+      if (cycle % 33 == 0) {
+        Pose sample = goal;
+        if (boundary) for (std::size_t axis = 0; axis < 3; ++axis)
+          sample.p[axis] += .0002 * std::sin(cycle * .13 + axis);
+        if ((cycle / 33) % 2) for (double& value : sample.q) value = -value;
+        sim.tracker.set_target(sample);
+      }
+      sim.step();
+      ever_limited = ever_limited || sim.position_limiter.limited();
+      peak_angle = std::max(peak_angle, quaternion_distance(sim.plant.pose.q, goal.q));
+      if (cycle == 10000) held = sim.plant.pose;
+      if (cycle >= 10000) hold_drift = std::max(hold_drift, distance(sim.plant.pose, held));
+      for (std::size_t joint = 0; joint < 7; ++joint)
+        require(sim.plant.q[joint] > kJointLowerLimits[joint] && sim.plant.q[joint] < kJointUpperLimits[joint],
+                "fixed downward motion crossed a joint position limit");
+    }
+    std::cout << "fixed_downward: goal=" << endpoint[0] << "," << endpoint[1] << "," << endpoint[2]
+              << " limited=" << ever_limited << " error_m=" << distance(sim.plant.pose, goal)
+              << " hold_drift_m=" << hold_drift << " peak_angle_rad=" << peak_angle << "\n";
+    require(hold_drift < .001, "fixed downward target kept drifting at the workspace boundary");
+    require(peak_angle < .01, "position-only motion tilted the fixed downward tool");
+    require(distance(sim.plant.pose, start) > .10, "position-only guard prevented ordinary movement");
+    if (boundary) require(ever_limited, "far high corner did not activate position boundary guard");
+    else if (!ever_limited)
+      require(distance(sim.plant.pose, goal) < .002, "unconstrained position-only target was not reached");
+    if (!boundary && endpoint[0] == .70 && endpoint[1] == 0.)
+      require(distance(sim.plant.pose, goal) < .002, "position boundary guard shortened straight forward travel");
+    for (int cycle = 0; cycle < 6000; ++cycle) {
+      sim.tracker.set_target(start);
+      sim.step();
+    }
+    require(!sim.position_limiter.limited(), "retreat did not release the position boundary guard");
+    require(distance(sim.plant.pose, start) < .001, "position-only motion did not return after retreat");
+    require(quaternion_distance(sim.plant.pose.q, start.q) < .001, "retreat lost the downward orientation");
+  }
+}
+
 void test_orientation_position_priority() {
   CartesianJacobian jacobian = CartesianJacobian::Zero();
   jacobian.leftCols<6>().setIdentity();
@@ -558,6 +624,8 @@ int main(int argc, char** argv) {
     else if (scenario == "zero_deadband") test_reported_posture(true);
     else if (scenario == "joint_moving") test_joint_moving();
     else if (scenario == "large_orientation") test_large_orientation();
+    else if (scenario == "fixed_downward_workspace") test_fixed_downward(false);
+    else if (scenario == "fixed_downward_boundary") test_fixed_downward(true);
     else if (scenario == "orientation_position_priority") test_orientation_position_priority();
     else if (scenario == "accepted_velocity") test_accepted_velocity();
     else if (scenario == "posture_nullspace") test_posture_nullspace();

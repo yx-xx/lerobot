@@ -27,9 +27,9 @@ def test_closing_grasps_and_opening_releases_even_below_object_width():
     controller.move_gripper(GripperCommand(0.08, time.monotonic()))
 
     assert gripper.mock_calls == [
-        call.stop(), call.grasp(0.005, 0.10, 15.0, 0.005, 0.08),
+        call.grasp(0.005, 0.10, 15.0, 0.005, 0.08),
         call.stop(), call.move(0.02, 0.10),
-        call.stop(), call.move(0.08, 0.10),
+        call.move(0.08, 0.10),
     ]
 
 
@@ -51,6 +51,7 @@ def test_failed_stop_does_not_start_another_gripper_motion():
     controller = StreamController("172.16.0.2")
     controller._gripper = MagicMock()
     controller._gripper.stop.return_value = False
+    controller._gripper_needs_stop = True
     controller._last_gripper_width = 0.04
     with pytest.raises(RuntimeError, match="stop did not complete"):
         controller.move_gripper(GripperCommand(0.08, time.monotonic()))
@@ -66,13 +67,23 @@ def test_outdated_native_gripper_fails_before_connecting_robot(monkeypatch):
     native.CartesianStreamer.assert_not_called()
 
 
+def test_outdated_position_controller_fails_before_connecting_robot(monkeypatch):
+    native = SimpleNamespace(
+        CartesianStreamer=MagicMock(), GripperIO=SimpleNamespace(grasp=MagicMock(), stop=MagicMock())
+    )
+    monkeypatch.setitem(sys.modules, "franka_ros2_bridge.cartesian_stream", native)
+    with pytest.raises(RuntimeError, match="outdated.*rebuild.*position boundary guard"):
+        StreamController("172.16.0.2").connect()
+    native.CartesianStreamer.assert_not_called()
+
+
 @pytest.mark.parametrize("force", [0.0, -1.0, 71.0, float("nan"), float("inf")])
 def test_invalid_grasp_force_is_rejected(force):
     with pytest.raises(ValueError, match="gripper_force"):
         StreamController("172.16.0.2", gripper_force=force)
 
 
-def _worker_node(controller, deadband=0.001, *, queue=None):
+def _worker_node(controller, deadband=0.001, *, queue=None, retarget_interval=0.1):
     logger = MagicMock()
     node = SimpleNamespace(
         _controller=controller,
@@ -80,6 +91,8 @@ def _worker_node(controller, deadband=0.001, *, queue=None):
         _stop_event=threading.Event(),
         _last_gripper_command=0.04,
         gripper_command_deadband=deadband,
+        gripper_retarget_interval_sec=retarget_interval,
+        gripper_retarget_deadband=0.002,
         get_logger=lambda: logger,
     )
     worker = threading.Thread(target=FrankaBridgeNode._stream_gripper_worker_loop, args=(node,))
@@ -130,6 +143,82 @@ def test_open_interrupts_blocked_close_and_only_latest_target_runs(deadband):
     finally:
         finish_close.set()
         _shutdown(node, worker)
+
+
+@pytest.mark.parametrize("widths", [(0.03, 0.01), (0.05, 0.08)])
+def test_large_same_direction_target_does_not_wait_for_blocking_motion(widths):
+    started, stopped, followed = (threading.Event() for _ in range(3))
+    executed = []
+
+    def move(command):
+        executed.append(command.width)
+        if len(executed) == 1:
+            started.set()
+            assert stopped.wait(timeout=1.0)
+            raise RuntimeError("intentionally interrupted")
+        followed.set()
+
+    controller = SimpleNamespace(move_gripper=move, stop_gripper=stopped.set)
+    node, worker, logger = _worker_node(controller, retarget_interval=0.05)
+    try:
+        node._commands.push_gripper(GripperCommand(widths[0], time.monotonic()))
+        assert started.wait(timeout=1.0)
+        node._commands.push_gripper(GripperCommand(widths[1], time.monotonic()))
+        assert followed.wait(timeout=0.5), "New target waited for the old blocking motion"
+        assert executed == list(widths)
+        logger.error.assert_not_called()
+    finally:
+        stopped.set()
+        _shutdown(node, worker)
+
+
+def test_small_same_direction_change_does_not_repeatedly_stop_motion():
+    started, finish, followed = (threading.Event() for _ in range(3))
+    executed = []
+
+    def move(command):
+        executed.append(command.width)
+        if len(executed) == 1:
+            started.set()
+            assert finish.wait(timeout=1.0)
+        else:
+            followed.set()
+
+    controller = SimpleNamespace(move_gripper=move, stop_gripper=MagicMock())
+    node, worker, _ = _worker_node(controller, retarget_interval=0.04)
+    try:
+        node._commands.push_gripper(GripperCommand(0.03, time.monotonic()))
+        assert started.wait(timeout=1.0)
+        node._commands.push_gripper(GripperCommand(0.0285, time.monotonic()))
+        assert not followed.wait(timeout=0.12)
+        controller.stop_gripper.assert_not_called()
+        finish.set()
+        assert followed.wait(timeout=1.0)
+    finally:
+        finish.set()
+        _shutdown(node, worker)
+
+
+def test_idle_gripper_starts_without_an_extra_stop_round_trip():
+    controller = StreamController("172.16.0.2")
+    controller._gripper = MagicMock()
+    controller._gripper.grasp.return_value = True
+    controller._last_gripper_width = 0.04
+    controller.move_gripper(GripperCommand(0.01, time.monotonic()))
+    controller._gripper.stop.assert_not_called()
+    controller._gripper.grasp.assert_called_once()
+
+
+def test_interrupted_grasp_is_not_stopped_a_second_time_before_release():
+    controller = StreamController("172.16.0.2")
+    gripper = MagicMock()
+    gripper.stop.return_value = gripper.grasp.return_value = gripper.move.return_value = True
+    controller._gripper = gripper
+    controller._last_gripper_width = 0.04
+    controller.move_gripper(GripperCommand(0.01, time.monotonic()))
+    controller.stop_gripper()
+    controller.move_gripper(GripperCommand(0.08, time.monotonic()))
+    gripper.stop.assert_called_once()
 
 
 def test_release_retries_stop_if_first_stop_precedes_sdk_motion():

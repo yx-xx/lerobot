@@ -35,6 +35,7 @@ def tracking_binary(tmp_path_factory):
     "changing_limits", "feedback_delay", "stress",
     "reported_posture", "zero_deadband", "joint_moving",
     "large_orientation", "orientation_position_priority", "posture_nullspace", "accepted_velocity",
+    "fixed_downward_workspace", "fixed_downward_boundary",
 ])
 def test_native_absolute_tracking(tracking_binary, scenario):
     result = subprocess.run([str(tracking_binary), scenario], capture_output=True, text=True, timeout=20)

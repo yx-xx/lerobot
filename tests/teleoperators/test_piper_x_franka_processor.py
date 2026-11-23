@@ -37,6 +37,12 @@ PIPER_BOX = ((0.0, 400.0), (-100.0, 100.0), (0.0, 200.0))
 FRANKA_BOX = ((0.20, 0.60), (-0.10, 0.10), (0.10, 0.30))
 PENDANT = (0.0, 80.0)
 GRIPPER = (0.00, 0.08)
+CALIBRATED_DOWNWARD_QUAT_XYZW = (
+    0.9992919885928564,
+    -0.03241738912274881,
+    0.00980888008203098,
+    0.016383537106962606,
+)
 
 
 def _processor(**kwargs):
@@ -197,3 +203,53 @@ def test_pipeline_factory_matches_step_output():
     assert mapped["end_pose.x"] == 0.40
     assert mapped["gripper.pos"] == 0.04
     assert set(mapped) == EXPECTED_ACTION_KEYS
+
+
+@pytest.mark.parametrize("rpy", [(0.0, 0.0, 0.0), (180.0, 90.0, -180.0), (-90.0, -90.0, 90.0)])
+def test_fixed_calibrated_downward_orientation_ignores_master_rotation(rpy):
+    processor = _processor(fixed_franka_quat_xyzw=CALIBRATED_DOWNWARD_QUAT_XYZW)
+    mapped = _apply(processor, _piper_action(x=200.0, pendant=40.0, roll=rpy[0], pitch=rpy[1], yaw=rpy[2]))
+    quat = [mapped[f"end_pose.{key}"] for key in ("qx", "qy", "qz", "qw")]
+    _assert_quat_close(quat, CALIBRATED_DOWNWARD_QUAT_XYZW, atol=1e-12)
+    assert mapped["end_pose.x"] == 0.40
+    assert mapped["gripper.pos"] == 0.04
+
+
+def test_fixed_orientation_does_not_require_master_orientation_measurements():
+    processor = _processor(fixed_franka_quat_xyzw=(2.0, 0.0, 0.0, 0.0))
+    mapped = _apply(processor, {"endpose.x": 0.0, "endpose.y": 0.0, "endpose.z": 0.0})
+    assert mapped["end_pose.qx"] == 1.0
+    assert mapped["end_pose.qw"] == 0.0
+
+
+def test_position_deadband_holds_boundary_noise_but_accumulates_real_motion():
+    processor = _processor(position_deadband_m=0.0015)
+    initial = _apply(processor, _piper_action(x=400.0, y=0.0, z=100.0))
+    for x in [399.8, 399.0, 400.2, 399.5]:
+        assert _apply(processor, _piper_action(x=x, y=0.0, z=100.0)) == initial
+    # Changes accumulate relative to the held target, not the previous sample.
+    moved = _apply(processor, _piper_action(x=398.0, y=0.0, z=100.0))
+    assert moved["end_pose.x"] == pytest.approx(0.598)
+    assert moved["end_pose.y"] == initial["end_pose.y"]
+    assert moved["end_pose.z"] == initial["end_pose.z"]
+
+
+def test_position_deadband_on_one_axis_is_not_released_by_another_axis():
+    processor = _processor(position_deadband_m=0.0015)
+    _apply(processor, _piper_action(x=400.0, y=0.0, z=100.0))
+    moved = _apply(processor, _piper_action(x=399.0, y=10.0, z=100.0))
+    assert moved["end_pose.x"] == 0.60
+    assert moved["end_pose.y"] == pytest.approx(0.01)
+
+
+def test_pipeline_factory_supports_fixed_orientation_and_position_deadband():
+    pipeline = make_piper_x_to_franka_teleop_processor(
+        piper_xyz_mm=PIPER_BOX, franka_xyz_m=FRANKA_BOX, pendant_mm=PENDANT, gripper_m=GRIPPER,
+        fixed_franka_quat_xyzw=CALIBRATED_DOWNWARD_QUAT_XYZW, position_deadband_m=0.0015,
+    )
+    mapped = pipeline((_piper_action(x=200.0, pitch=90.0), _franka_obs()))
+    _assert_quat_close(
+        [mapped[f"end_pose.{key}"] for key in ("qx", "qy", "qz", "qw")],
+        CALIBRATED_DOWNWARD_QUAT_XYZW,
+        atol=1e-12,
+    )

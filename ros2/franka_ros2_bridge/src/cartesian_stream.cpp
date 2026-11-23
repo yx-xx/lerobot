@@ -238,19 +238,20 @@ class CartesianStreamer {
                     double max_angular_acceleration, double max_angular_jerk,
                     double tracking_frequency_hz, double linear_deadband,
                     double angular_deadband, bool lock_elbow, int control_cpu,
-                    double initial_sync_scale, double startup_ramp_sec)
+                    double initial_sync_scale, double startup_ramp_sec, bool position_boundary_guard)
       : ip_(std::move(ip)), max_linear_velocity_(max_linear_velocity),
         max_linear_acceleration_(max_linear_acceleration), max_linear_jerk_(max_linear_jerk),
         max_angular_velocity_(max_angular_velocity), max_angular_acceleration_(max_angular_acceleration),
         max_angular_jerk_(max_angular_jerk),
         linear_deadband_(linear_deadband), angular_deadband_(angular_deadband),
         lock_elbow_(lock_elbow), control_cpu_(control_cpu),
-        initial_sync_scale_(initial_sync_scale),
+        initial_sync_scale_(initial_sync_scale), position_boundary_guard_(position_boundary_guard),
         tracker_({max_linear_velocity, max_linear_acceleration, max_linear_jerk},
                  {max_angular_velocity, max_angular_acceleration, max_angular_jerk},
                  tracking_frequency_hz, linear_deadband, angular_deadband,
                  initial_sync_scale, startup_ramp_sec),
-        orientation_limiter_({max_angular_velocity, max_angular_acceleration, max_angular_jerk}) {
+        orientation_limiter_({max_angular_velocity, max_angular_acceleration, max_angular_jerk}),
+        position_limiter_({max_linear_velocity, max_linear_acceleration, max_linear_jerk}) {
     if (ip_.empty()) {
       throw std::invalid_argument("robot ip must not be empty");
     }
@@ -297,6 +298,7 @@ class CartesianStreamer {
     target_.store(commanded_);
     tracker_.reset(commanded_);
     orientation_limiter_.reset();
+    position_limiter_.reset();
     previous_jacobian_valid_ = false;
     state_.store(state, commanded_);
     posture_reference_ = state.q_d;
@@ -441,6 +443,7 @@ class CartesianStreamer {
         diagnostics["position_error"] = position_error_.load(std::memory_order_relaxed);
         diagnostics["orientation_error"] = orientation_error_.load(std::memory_order_relaxed);
         diagnostics["orientation_limited"] = orientation_limited_.load(std::memory_order_relaxed);
+        diagnostics["position_limited"] = position_limited_.load(std::memory_order_relaxed);
         const std::uint64_t last_target_ns =
             last_target_message_ns_.load(std::memory_order_relaxed);
         const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -548,6 +551,8 @@ class CartesianStreamer {
                   << joint_velocity_scale_.load(std::memory_order_relaxed)
                   << " position_error=" << position_error_.load(std::memory_order_relaxed)
                   << " orientation_error=" << orientation_error_.load(std::memory_order_relaxed)
+                  << " position_limited=" << position_limited_.load(std::memory_order_relaxed)
+                  << " orientation_limited=" << orientation_limited_.load(std::memory_order_relaxed)
                   << " elbow_locked=" << lock_elbow_
                   << " startup_state="
                   << startup_state_.load(std::memory_order_relaxed)
@@ -720,7 +725,11 @@ class CartesianStreamer {
     matrix_to_pose(model_->pose(franka::Frame::kEndEffector, state.q_d,
                                 state.F_T_EE, state.EE_T_K), &accepted_pose);
     const PseudoInverse inverse = inverse_jacobian(jacobian);
-    tracker_.set_target(orientation_limiter_.constrain(accepted_pose, active_target_, inverse, state.q_d, state.dq_d));
+    const Pose position_target = position_boundary_guard_ ? position_limiter_.constrain(
+        accepted_pose, active_target_, inverse, state.q_d, state.dq_d, accepted_velocity,
+        minimum_singular_value_.load(std::memory_order_relaxed)) : active_target_;
+    tracker_.set_target(orientation_limiter_.constrain(accepted_pose, position_target, inverse, state.q_d, state.dq_d));
+    position_limited_.store(position_limiter_.limited(), std::memory_order_relaxed);
     orientation_limited_.store(orientation_limiter_.limited(), std::memory_order_relaxed);
     const Twist allocation = tracker_.axis_allocation(accepted_pose, accepted_velocity,
                                                       accepted_acceleration);
@@ -757,8 +766,10 @@ class CartesianStreamer {
   bool lock_elbow_;
   int control_cpu_;
   double initial_sync_scale_;
+  bool position_boundary_guard_;
   AbsolutePoseTracker tracker_;
   OrientationTargetLimiter orientation_limiter_;
+  PositionTargetLimiter position_limiter_;
   Jacobian previous_jacobian_ = Jacobian::Zero();
   bool previous_jacobian_valid_{false};
   std::unique_ptr<franka::Robot> robot_;
@@ -794,6 +805,7 @@ class CartesianStreamer {
   std::atomic<double> position_error_{0.0};
   std::atomic<double> orientation_error_{0.0};
   std::atomic<bool> orientation_limited_{false};
+  std::atomic<bool> position_limited_{false};
   bool first_command_sent_{false};
   std::uint32_t singular_value_cycle_{0};
 };
@@ -812,7 +824,7 @@ PYBIND11_MODULE(cartesian_stream, m) {
 
   py::class_<CartesianStreamer>(m, "CartesianStreamer")
       .def(py::init<std::string, double, double, double, double, double, double, double, double,
-                    double, bool, int, double, double>(),
+                    double, bool, int, double, double, bool>(),
            py::arg("ip"), py::arg("max_linear_velocity") = 0.40,
            py::arg("max_linear_acceleration") = 2.0, py::arg("max_linear_jerk") = 12.0,
            py::arg("max_angular_velocity") = 0.80,
@@ -820,7 +832,7 @@ PYBIND11_MODULE(cartesian_stream, m) {
            py::arg("tracking_frequency_hz") = 5.0, py::arg("linear_deadband") = 0.001,
            py::arg("angular_deadband") = 0.010, py::arg("lock_elbow") = true,
            py::arg("control_cpu") = 4, py::arg("initial_sync_scale") = 0.60,
-           py::arg("startup_ramp_sec") = 0.30)
+           py::arg("startup_ramp_sec") = 0.30, py::arg("position_boundary_guard") = false)
       .def("start", &CartesianStreamer::start)
       .def("stop", &CartesianStreamer::stop)
       .def("set_target", &CartesianStreamer::set_target)
@@ -828,4 +840,5 @@ PYBIND11_MODULE(cartesian_stream, m) {
       .def("get_diagnostics", &CartesianStreamer::get_diagnostics)
       .def("running", &CartesianStreamer::running)
       .def("check_error", &CartesianStreamer::check_error);
+  m.attr("CartesianStreamer").attr("supports_position_boundary_guard") = true;
 }

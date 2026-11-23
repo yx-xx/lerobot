@@ -38,9 +38,10 @@ class StreamController:
         control_cpu: int = 4,
         initial_sync_scale: float = 0.60,
         startup_ramp_sec: float = 0.30,
+        position_boundary_guard: bool = False,
         gripper_speed: float = DEFAULT_GRIPPER_SPEED,
         gripper_force: float = 20.0,
-        gripper_poll_rate_hz: float = 2.0,
+        gripper_poll_rate_hz: float = 20.0,
     ) -> None:
         if not robot_ip.strip():
             raise ValueError("robot_ip must not be empty")
@@ -64,6 +65,8 @@ class StreamController:
             raise ValueError("angular_deadband must be in [0, 0.5]")
         if not isinstance(lock_elbow, bool):
             raise TypeError("lock_elbow must be a bool")
+        if not isinstance(position_boundary_guard, bool):
+            raise TypeError("position_boundary_guard must be a bool")
         if not isinstance(control_cpu, int) or isinstance(control_cpu, bool) or control_cpu < -1:
             raise ValueError("control_cpu must be -1 or a non-negative integer")
         if not 0.0 < initial_sync_scale <= 1.0:
@@ -90,10 +93,12 @@ class StreamController:
         self._control_cpu = control_cpu
         self._initial_sync_scale = initial_sync_scale
         self._startup_ramp_sec = startup_ramp_sec
+        self._position_boundary_guard = position_boundary_guard
         self._gripper_speed = gripper_speed
         self._gripper_force = gripper_force
         self._gripper_target_width: float | None = None
         self._gripper_closing = False
+        self._gripper_needs_stop = False
         self._stream: Any | None = None
         self._gripper: Any | None = None
         self._gripper_lock = threading.Lock()
@@ -118,6 +123,11 @@ class StreamController:
                 "GripperIO is outdated: rebuild franka_ros2_bridge on the Franka computer "
                 "to enable grasp and interruptible release."
             )
+        if getattr(CartesianStreamer, "supports_position_boundary_guard", False) is not True:
+            raise RuntimeError(
+                "CartesianStreamer is outdated: rebuild franka_ros2_bridge on the Franka computer "
+                "to enable the position boundary guard."
+            )
         stream = CartesianStreamer(
             self._robot_ip,
             self._max_linear_velocity,
@@ -133,6 +143,7 @@ class StreamController:
             self._control_cpu,
             self._initial_sync_scale,
             self._startup_ramp_sec,
+            self._position_boundary_guard,
         )
         stream.start()
         try:
@@ -147,6 +158,9 @@ class StreamController:
         self._gripper = gripper
         self._gripper_target_width = None
         self._gripper_closing = False
+        # Width alone does not tell whether an earlier client left grasp force
+        # active. Release it on the first command after connecting.
+        self._gripper_needs_stop = True
         self._last_gripper_width = width
         self._last_gripper_poll = time.monotonic()
         self._gripper_poll_errors = 0
@@ -243,10 +257,14 @@ class StreamController:
                 self._gripper_closing = command.width < previous_target
             closing = self._gripper_closing
             self._gripper_target_width = command.width
-        # Release any previous holding force before changing the target.
-        if not gripper.stop():
-            raise RuntimeError("gripper stop did not complete")
+            needs_stop = self._gripper_needs_stop
+        # The worker already stops interrupted motions. Do not add another
+        # synchronous stop round trip before every idle move or retarget.
+        if needs_stop:
+            self.stop_gripper()
         if closing:
+            with self._gripper_lock:
+                self._gripper_needs_stop = True
             # Object width is unknown in teleoperation. Accept contact anywhere
             # above the requested width, over the Panda's 80 mm opening range.
             completed = gripper.grasp(
@@ -262,6 +280,9 @@ class StreamController:
             gripper = self._gripper
         if gripper is not None and not gripper.stop():
             raise RuntimeError("gripper stop did not complete")
+        with self._gripper_lock:
+            if self._gripper is gripper:
+                self._gripper_needs_stop = False
 
     def _require_stream(self) -> Any:
         stream = self._stream

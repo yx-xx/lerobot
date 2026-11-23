@@ -177,6 +177,10 @@ class MapPiperXEndposeToFrankaAction(RobotActionProcessorStep):
     ``R_franka = R_piper @ R_piper_ref.inv() @ R_franka_ref``.
     Base XYZ axes correspond as in the position map. The right-hand constant
     accounts for different tool axes without rotating the motion directions.
+
+    ``fixed_franka_quat_xyzw`` overrides orientation mapping for position-only
+    collection. An optional per-axis position deadband holds the last accepted
+    target until input changes accumulate past it, including at clipped edges.
     """
 
     piper_xyz_mm: Box3
@@ -185,7 +189,10 @@ class MapPiperXEndposeToFrankaAction(RobotActionProcessorStep):
     gripper_m: AxisRange
     piper_ref_rpy_deg: tuple[float, float, float] = (0.0, 0.0, 0.0)
     franka_ref_quat_xyzw: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
+    fixed_franka_quat_xyzw: tuple[float, float, float, float] | None = None
+    position_deadband_m: float = 0.0
     _tool_offset: Rotation = field(init=False, repr=False)
+    _held_position: list[float] | None = field(init=False, default=None, repr=False)
 
     def __post_init__(self) -> None:
         self.piper_xyz_mm = _validate_box(self.piper_xyz_mm, "piper_xyz_mm")
@@ -196,12 +203,24 @@ class MapPiperXEndposeToFrankaAction(RobotActionProcessorStep):
         self.franka_ref_quat_xyzw = _finite_quat_xyzw(
             self.franka_ref_quat_xyzw, "franka_ref_quat_xyzw"
         )
+        if self.fixed_franka_quat_xyzw is not None:
+            self.fixed_franka_quat_xyzw = _finite_quat_xyzw(
+                self.fixed_franka_quat_xyzw, "fixed_franka_quat_xyzw"
+            )
+        if (
+            isinstance(self.position_deadband_m, bool)
+            or not isinstance(self.position_deadband_m, (int, float))
+            or not np.isfinite(self.position_deadband_m)
+            or self.position_deadband_m < 0.0
+        ):
+            raise ValueError("position_deadband_m must be finite and non-negative")
         self._tool_offset = align_rotation_from_corresponding_poses(
             self.piper_ref_rpy_deg, self.franka_ref_quat_xyzw
         )
 
     def action(self, action: RobotAction) -> RobotAction:
-        _require_finite(action, PIPER_ENDPOSE_KEYS, "Piper-X action")
+        required_keys = PIPER_ENDPOSE_KEYS if self.fixed_franka_quat_xyzw is None else PIPER_ENDPOSE_KEYS[:3]
+        _require_finite(action, required_keys, "Piper-X action")
         target_pos = [
             map_calibrated_range(
                 float(action[f"endpose.{axis}"]),
@@ -210,13 +229,22 @@ class MapPiperXEndposeToFrankaAction(RobotActionProcessorStep):
             )
             for index, axis in enumerate("xyz")
         ]
-        piper_rotation = _rpy_zyx_to_rotation(
-            roll=np.deg2rad(float(action["endpose.roll"])),
-            pitch=np.deg2rad(float(action["endpose.pitch"])),
-            yaw=np.deg2rad(float(action["endpose.yaw"])),
-        )
-        rotation = piper_rotation * self._tool_offset
-        quat = rotation.as_quat()
+        if self._held_position is not None and self.position_deadband_m > 0.0:
+            target_pos = [
+                held if abs(target - held) < self.position_deadband_m else target
+                for target, held in zip(target_pos, self._held_position, strict=True)
+            ]
+        self._held_position = target_pos
+        if self.fixed_franka_quat_xyzw is not None:
+            quat = self.fixed_franka_quat_xyzw
+        else:
+            piper_rotation = _rpy_zyx_to_rotation(
+                roll=np.deg2rad(float(action["endpose.roll"])),
+                pitch=np.deg2rad(float(action["endpose.pitch"])),
+                yaw=np.deg2rad(float(action["endpose.yaw"])),
+            )
+            rotation = piper_rotation * self._tool_offset
+            quat = rotation.as_quat()
         return {
             "end_pose.x": float(target_pos[0]),
             "end_pose.y": float(target_pos[1]),
@@ -260,6 +288,8 @@ def make_piper_x_to_franka_teleop_processor(
     gripper_m: AxisRange,
     piper_ref_rpy_deg: tuple[float, float, float] = (0.0, 0.0, 0.0),
     franka_ref_quat_xyzw: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0),
+    fixed_franka_quat_xyzw: tuple[float, float, float, float] | None = None,
+    position_deadband_m: float = 0.0,
 ) -> RobotProcessorPipeline[tuple[RobotAction, RobotObservation], RobotAction]:
     return RobotProcessorPipeline[tuple[RobotAction, RobotObservation], RobotAction](
         steps=[
@@ -270,6 +300,8 @@ def make_piper_x_to_franka_teleop_processor(
                 gripper_m=gripper_m,
                 piper_ref_rpy_deg=piper_ref_rpy_deg,
                 franka_ref_quat_xyzw=franka_ref_quat_xyzw,
+                fixed_franka_quat_xyzw=fixed_franka_quat_xyzw,
+                position_deadband_m=position_deadband_m,
             )
         ],
         to_transition=robot_action_observation_to_transition,
