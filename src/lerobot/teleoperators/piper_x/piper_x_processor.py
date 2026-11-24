@@ -8,6 +8,7 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
+import logging
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -19,6 +20,7 @@ from lerobot.processor import (
     RobotActionProcessorStep,
     RobotObservation,
     RobotProcessorPipeline,
+    TransitionKey,
 )
 from lerobot.processor.converters import (
     robot_action_observation_to_transition,
@@ -45,6 +47,8 @@ FRANKA_END_POSE_KEYS = (
 )
 TEACHING_PENDANT_KEY = "teaching_pendant.pos"
 GRIPPER_KEY = "gripper.pos"
+
+logger = logging.getLogger(__name__)
 
 AxisRange = tuple[float, float]
 Box3 = tuple[AxisRange, AxisRange, AxisRange]
@@ -181,6 +185,11 @@ class MapPiperXEndposeToFrankaAction(RobotActionProcessorStep):
     ``fixed_franka_quat_xyzw`` overrides orientation mapping for position-only
     collection. An optional per-axis position deadband holds the last accepted
     target until input changes accumulate past it, including at clipped edges.
+
+    With ``gripper_release_clearance_m > 0``, an opening reversal sets a minimum
+    target above the observed Franka width. An object can block closure far above
+    the mapped target; opening must clear that actual width to release it. The
+    minimum is latched for the opening stroke, not recomputed on every frame.
     """
 
     piper_xyz_mm: Box3
@@ -191,8 +200,13 @@ class MapPiperXEndposeToFrankaAction(RobotActionProcessorStep):
     franka_ref_quat_xyzw: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
     fixed_franka_quat_xyzw: tuple[float, float, float, float] | None = None
     position_deadband_m: float = 0.0
+    gripper_release_clearance_m: float = 0.0
+    gripper_direction_deadband_m: float = 0.001
     _tool_offset: Rotation = field(init=False, repr=False)
     _held_position: list[float] | None = field(init=False, default=None, repr=False)
+    _gripper_direction_width: float | None = field(init=False, default=None, repr=False)
+    _gripper_opening: bool | None = field(init=False, default=None, repr=False)
+    _gripper_release_floor: float | None = field(init=False, default=None, repr=False)
 
     def __post_init__(self) -> None:
         self.piper_xyz_mm = _validate_box(self.piper_xyz_mm, "piper_xyz_mm")
@@ -214,6 +228,15 @@ class MapPiperXEndposeToFrankaAction(RobotActionProcessorStep):
             or self.position_deadband_m < 0.0
         ):
             raise ValueError("position_deadband_m must be finite and non-negative")
+        for name in ("gripper_release_clearance_m", "gripper_direction_deadband_m"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not np.isfinite(value)
+                or value < 0.0
+            ):
+                raise ValueError(f"{name} must be finite and non-negative")
         self._tool_offset = align_rotation_from_corresponding_poses(
             self.piper_ref_rpy_deg, self.franka_ref_quat_xyzw
         )
@@ -268,7 +291,47 @@ class MapPiperXEndposeToFrankaAction(RobotActionProcessorStep):
             ):
                 raise ValueError("teaching_pendant.pos must be a finite number")
             pendant_mm = float(pendant)
-        return float(map_calibrated_range(pendant_mm, self.pendant_mm, self.gripper_m))
+        width = float(map_calibrated_range(pendant_mm, self.pendant_mm, self.gripper_m))
+        if self.gripper_release_clearance_m <= 0.0:
+            return width
+
+        if self._gripper_direction_width is None:
+            self._gripper_direction_width = width
+        elif abs(width - self._gripper_direction_width) > self.gripper_direction_deadband_m:
+            opening = width > self._gripper_direction_width
+            self._gripper_direction_width = width
+            if not opening:
+                self._gripper_release_floor = None
+            elif self._gripper_opening is not True:
+                observation = {}
+                if self._current_transition is not None:
+                    observation = self.transition.get(TransitionKey.OBSERVATION) or {}
+                actual = observation.get(GRIPPER_KEY)
+                low, high = sorted(self.gripper_m)
+                if (
+                    not isinstance(actual, bool)
+                    and isinstance(actual, (int, float, np.floating))
+                    and np.isfinite(actual)
+                    and low <= actual <= high
+                ):
+                    self._gripper_release_floor = min(high, float(actual) + self.gripper_release_clearance_m)
+                    if self._gripper_release_floor > width:
+                        logger.info(
+                            "Gripper release: mapped=%.1f mm, actual=%.1f mm, target=%.1f mm",
+                            1000.0 * width, 1000.0 * actual, 1000.0 * self._gripper_release_floor,
+                        )
+            self._gripper_opening = opening
+
+        if self._gripper_release_floor is not None:
+            width = max(width, self._gripper_release_floor)
+        return width
+
+    def reset(self) -> None:
+        self._held_position = None
+        self._gripper_direction_width = None
+        self._gripper_opening = None
+        self._gripper_release_floor = None
+        self._current_transition = None
 
     def transform_features(
         self, features: dict[PipelineFeatureType, dict[str, PolicyFeature]]
@@ -290,6 +353,8 @@ def make_piper_x_to_franka_teleop_processor(
     franka_ref_quat_xyzw: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0),
     fixed_franka_quat_xyzw: tuple[float, float, float, float] | None = None,
     position_deadband_m: float = 0.0,
+    gripper_release_clearance_m: float = 0.0,
+    gripper_direction_deadband_m: float = 0.001,
 ) -> RobotProcessorPipeline[tuple[RobotAction, RobotObservation], RobotAction]:
     return RobotProcessorPipeline[tuple[RobotAction, RobotObservation], RobotAction](
         steps=[
@@ -302,6 +367,8 @@ def make_piper_x_to_franka_teleop_processor(
                 franka_ref_quat_xyzw=franka_ref_quat_xyzw,
                 fixed_franka_quat_xyzw=fixed_franka_quat_xyzw,
                 position_deadband_m=position_deadband_m,
+                gripper_release_clearance_m=gripper_release_clearance_m,
+                gripper_direction_deadband_m=gripper_direction_deadband_m,
             )
         ],
         to_transition=robot_action_observation_to_transition,

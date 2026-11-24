@@ -75,6 +75,8 @@ class FrankaRobot(Robot):
         self._node = None
         self._executor = None
         self._executor_thread: threading.Thread | None = None
+        self._executor_error: Exception | None = None
+        self._executor_stopping = threading.Event()
         self._joint_publisher = None
         self._end_pose_publisher = None
         self._gripper_publisher = None
@@ -122,6 +124,8 @@ class FrankaRobot(Robot):
             ) from _ROS_IMPORT_ERROR
 
         try:
+            self._executor_stopping.clear()
+            self._executor_error = None
             self._context = rclpy.context.Context()
             rclpy.init(context=self._context)
             self._node = rclpy.create_node(self.config.node_name, context=self._context)
@@ -155,7 +159,7 @@ class FrankaRobot(Robot):
             self._executor = SingleThreadedExecutor(context=self._context)
             self._executor.add_node(self._node)
             self._executor_thread = threading.Thread(
-                target=self._executor.spin,
+                target=self._spin_executor,
                 name=f"{self.config.node_name}-executor",
                 daemon=True,
             )
@@ -180,8 +184,7 @@ class FrankaRobot(Robot):
         pass
 
     def get_observation(self) -> dict[str, Any]:
-        if not self.is_connected:
-            raise DeviceNotConnectedError(f"{self} is not connected.")
+        self._require_connected()
 
         with self._lock:
             now = time.monotonic()
@@ -195,11 +198,11 @@ class FrankaRobot(Robot):
             ):
                 raise RuntimeError("Franka state is incomplete.")
             if now - self._joint_state_time > self.config.state_timeout_s:
-                raise RuntimeError("Franka joint state is stale.")
+                raise self._stale_state_error("joint state", now)
             if now - self._end_pose_time > self.config.state_timeout_s:
-                raise RuntimeError("Franka end-effector pose is stale.")
+                raise self._stale_state_error("end-effector pose", now)
             if now - self._gripper_state_time > self.config.state_timeout_s:
-                raise RuntimeError("Franka gripper state is stale.")
+                raise self._stale_state_error("gripper state", now)
             observation = {
                 **{
                     key: self._joint_positions[name]
@@ -230,8 +233,9 @@ class FrankaRobot(Robot):
         with self._lock:
             if self._joint_positions is None or self._joint_state_time is None:
                 raise RuntimeError("Franka joint state is unavailable.")
-            if time.monotonic() - self._joint_state_time > self.config.state_timeout_s:
-                raise RuntimeError("Franka joint state is stale.")
+            now = time.monotonic()
+            if now - self._joint_state_time > self.config.state_timeout_s:
+                raise self._stale_state_error("joint state", now)
             present = {
                 f"j{i}": self._joint_positions[name]
                 for i, name in enumerate(JOINT_NAMES, start=1)
@@ -267,8 +271,9 @@ class FrankaRobot(Robot):
         with self._lock:
             if self._end_pose is None or self._end_pose_time is None:
                 raise RuntimeError("Franka end-effector pose is unavailable.")
-            if time.monotonic() - self._end_pose_time > self.config.state_timeout_s:
-                raise RuntimeError("Franka end-effector pose is stale.")
+            now = time.monotonic()
+            if now - self._end_pose_time > self.config.state_timeout_s:
+                raise self._stale_state_error("end-effector pose", now)
             current_position = self._end_pose[:3]
             current_quaternion = self._normalize_quaternion(self._end_pose[3:])
 
@@ -353,6 +358,7 @@ class FrankaRobot(Robot):
     def _wait_for_initial_state(self) -> None:
         deadline = time.monotonic() + self.config.connect_timeout_s
         while time.monotonic() < deadline:
+            self._check_executor()
             with self._lock:
                 if (
                     self._joint_positions is not None
@@ -361,6 +367,7 @@ class FrankaRobot(Robot):
                 ):
                     return
             time.sleep(0.01)
+        self._check_executor()
         missing = []
         with self._lock:
             if self._joint_positions is None:
@@ -381,6 +388,7 @@ class FrankaRobot(Robot):
 
     def _cleanup(self) -> None:
         self._connected = False
+        self._executor_stopping.set()
         for camera in self.cameras.values():
             try:
                 if camera.is_connected:
@@ -433,6 +441,45 @@ class FrankaRobot(Robot):
     def _require_connected(self) -> None:
         if not self.is_connected:
             raise DeviceNotConnectedError(f"{self} is not connected.")
+        self._check_executor()
+
+    def _spin_executor(self) -> None:
+        try:
+            self._executor.spin()
+        except Exception as exc:
+            if not self._executor_stopping.is_set():
+                with self._lock:
+                    self._executor_error = exc
+                logger.exception("Franka ROS executor failed; state reception has stopped.")
+
+    def _check_executor(self) -> None:
+        with self._lock:
+            error = self._executor_error
+        if error is not None:
+            raise RuntimeError(f"Franka ROS executor failed; state reception stopped: {error}") from error
+        if self._executor_thread is not None and not self._executor_thread.is_alive():
+            raise RuntimeError("Franka ROS executor stopped; state reception is unavailable.")
+
+    def _stale_state_error(self, state_name: str, now: float) -> RuntimeError:
+        """Describe valid sample ages while the caller holds ``_lock``."""
+        samples = (
+            (self.config.joint_state_topic, self._joint_state_time),
+            (self.config.end_pose_topic, self._end_pose_time),
+            (self.config.gripper_state_topic, self._gripper_state_time),
+        )
+        ages = ", ".join(
+            f"{topic}={now - received_at:.2f}s" if received_at is not None else f"{topic}=missing"
+            for topic, received_at in samples
+        )
+        executor_running = self._executor_thread is not None and self._executor_thread.is_alive()
+        domain = os.environ.get("ROS_DOMAIN_ID", "0")
+        return RuntimeError(
+            f"Franka {state_name} is stale (timeout={self.config.state_timeout_s:.2f}s). "
+            f"Valid state ages: {ages}. ROS_DOMAIN_ID={domain}; "
+            f"ROS executor={'running' if executor_running else 'stopped'}. "
+            "Check the control-PC franka_ros2_bridge log for 'State read failed' or "
+            "'Cartesian stream failed', and check ROS topic delivery and message validity."
+        )
 
     @staticmethod
     def _validate_action(action: dict[str, float], expected_keys: tuple[str, ...]) -> dict[str, float]:

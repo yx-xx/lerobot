@@ -253,3 +253,65 @@ def test_pipeline_factory_supports_fixed_orientation_and_position_deadband():
         CALIBRATED_DOWNWARD_QUAT_XYZW,
         atol=1e-12,
     )
+
+
+def test_piper_franka_setup_opens_past_object_on_first_release_input():
+    from examples.piper_x_to_franka.common import make_mapped_action_processor
+
+    pipeline = make_mapped_action_processor()
+    observation = {"gripper.pos": 0.04}  # A 40 mm object blocks a 4.5 mm closing target.
+    closed = pipeline((_piper_action(pendant=51.0), observation))
+    released = pipeline((_piper_action(pendant=60.0), observation))
+    assert closed["gripper.pos"] == pytest.approx(0.0045)
+    assert released["gripper.pos"] == pytest.approx(0.045)
+
+
+def test_release_clearance_is_latched_without_creeping_open_and_resets_on_close():
+    processor = _processor(gripper_release_clearance_m=0.005)
+    _apply(processor, _piper_action(pendant=5.0), {"gripper.pos": 0.04})
+    assert _apply(processor, _piper_action(pendant=7.0), {"gripper.pos": 0.04})["gripper.pos"] == pytest.approx(0.045)
+    # Moving feedback must not keep adding another 5 mm, nor can input noise re-grasp.
+    for pendant, actual in ((7.4, 0.045), (7.0, 0.045), (8.5, 0.045), (20.0, 0.045)):
+        assert _apply(processor, _piper_action(pendant=pendant), {"gripper.pos": actual})["gripper.pos"] == pytest.approx(0.045)
+    # The original absolute mapping resumes above the floor and on deliberate closure.
+    assert _apply(processor, _piper_action(pendant=55.0), {"gripper.pos": 0.045})["gripper.pos"] == pytest.approx(0.055)
+    assert _apply(processor, _piper_action(pendant=50.0), {"gripper.pos": 0.055})["gripper.pos"] == pytest.approx(0.05)
+    assert _apply(processor, _piper_action(pendant=5.0), {"gripper.pos": 0.04})["gripper.pos"] == pytest.approx(0.005)
+
+
+def test_release_hysteresis_filters_noise_and_accumulates_slow_opening():
+    processor = _processor(gripper_release_clearance_m=0.005)
+    for pendant in (5.0, 5.4, 5.0, 5.4, 5.8):
+        width = _apply(processor, _piper_action(pendant=pendant), {"gripper.pos": 0.04})["gripper.pos"]
+        assert width < 0.006
+    released = _apply(processor, _piper_action(pendant=6.2), {"gripper.pos": 0.04})
+    assert released["gripper.pos"] == pytest.approx(0.045)
+
+
+def test_release_never_exceeds_calibrated_maximum_and_reset_clears_latch():
+    processor = _processor(gripper_release_clearance_m=0.005)
+    _apply(processor, _piper_action(pendant=5.0), {"gripper.pos": 0.079})
+    assert _apply(processor, _piper_action(pendant=7.0), {"gripper.pos": 0.079})["gripper.pos"] == pytest.approx(0.08)
+    processor.reset()
+    assert _apply(processor, _piper_action(pendant=7.0), {"gripper.pos": 0.04})["gripper.pos"] == pytest.approx(0.007)
+
+
+@pytest.mark.parametrize("actual", [None, float("nan"), float("inf"), -0.01, 0.09, True])
+def test_release_without_valid_width_feedback_keeps_absolute_mapping(actual):
+    processor = _processor(gripper_release_clearance_m=0.005)
+    observation = {"gripper.pos": actual}
+    _apply(processor, _piper_action(pendant=5.0), observation)
+    assert _apply(processor, _piper_action(pendant=7.0), observation)["gripper.pos"] == pytest.approx(0.007)
+
+
+def test_release_clearance_is_opt_in_for_other_robot_setups():
+    processor = _processor()
+    _apply(processor, _piper_action(pendant=5.0), {"gripper.pos": 0.04})
+    assert _apply(processor, _piper_action(pendant=7.0), {"gripper.pos": 0.04})["gripper.pos"] == pytest.approx(0.007)
+
+
+@pytest.mark.parametrize("setting", ["gripper_release_clearance_m", "gripper_direction_deadband_m"])
+@pytest.mark.parametrize("value", [-0.001, float("nan"), float("inf"), True])
+def test_invalid_gripper_release_parameters_are_rejected(setting, value):
+    with pytest.raises(ValueError, match=setting):
+        _processor(**{setting: value})

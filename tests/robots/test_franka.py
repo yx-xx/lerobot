@@ -260,3 +260,145 @@ def test_connect_without_ros_reports_runtime_error(tmp_path):
         pytest.raises(RuntimeError, match="ROS 2 Python packages are unavailable"),
     ):
         robot.connect()
+
+
+@pytest.mark.parametrize(
+    ("timestamp", "state_name"),
+    [
+        ("_joint_state_time", "joint state"),
+        ("_end_pose_time", "end-effector pose"),
+        ("_gripper_state_time", "gripper state"),
+    ],
+)
+def test_stale_observation_reports_all_state_ages(tmp_path, ros_mocks, monkeypatch, timestamp, state_name):
+    monkeypatch.setenv("ROS_DOMAIN_ID", "23")
+    robot = _make_robot(tmp_path)
+    robot.connect()
+    try:
+        with robot._lock:
+            robot._joint_state_time = robot._end_pose_time = robot._gripper_state_time = 99.9
+            setattr(robot, timestamp, 96.5)
+        with patch.object(franka_module.time, "monotonic", return_value=100.0):
+            with pytest.raises(RuntimeError, match=f"Franka {state_name} is stale") as caught:
+                robot.get_observation()
+
+        message = str(caught.value)
+        assert "timeout=1.00s" in message
+        for topic, attr in [
+            (robot.config.joint_state_topic, "_joint_state_time"),
+            (robot.config.end_pose_topic, "_end_pose_time"),
+            (robot.config.gripper_state_topic, "_gripper_state_time"),
+        ]:
+            age = "3.50s" if attr == timestamp else "0.10s"
+            assert f"{topic}={age}" in message
+        assert "ROS_DOMAIN_ID=23" in message
+        assert "ROS executor=running" in message
+        assert "control-PC franka_ros2_bridge log" in message
+    finally:
+        robot.disconnect()
+
+
+@pytest.mark.parametrize("control_mode", ["joint", "cartesian"])
+def test_stale_action_state_prevents_arm_and_gripper_publication(tmp_path, ros_mocks, control_mode):
+    _, nodes = ros_mocks
+    robot = _make_robot(tmp_path, control_mode=control_mode)
+    robot.connect()
+    try:
+        observation = robot.get_observation()
+        action = {key: observation[key] for key in robot.action_features}
+        with robot._lock:
+            robot._joint_state_time = robot._end_pose_time = 96.5
+        with patch.object(franka_module.time, "monotonic", return_value=100.0):
+            with pytest.raises(RuntimeError, match="is stale.*timeout=1.00s"):
+                robot.send_action(action)
+        assert all(not publisher.messages for _, _, publisher in nodes[0].publishers.values())
+    finally:
+        robot.disconnect()
+
+
+def test_invalid_joint_messages_do_not_refresh_watchdog(tmp_path, ros_mocks):
+    robot = _make_robot(tmp_path)
+    robot.connect()
+    try:
+        with robot._lock:
+            robot._joint_state_time = 96.5
+        invalid = _JointState()
+        invalid.position[0] = float("nan")
+        with patch.object(franka_module.time, "monotonic", return_value=100.0):
+            robot._joint_state_callback(invalid)
+            with pytest.raises(RuntimeError, match="joint state is stale"):
+                robot.get_observation()
+        assert robot._joint_state_time == 96.5
+    finally:
+        robot.disconnect()
+
+
+def test_executor_startup_failure_is_reported_and_connection_can_retry(tmp_path, ros_mocks):
+    _, nodes = ros_mocks
+    robot = _make_robot(tmp_path)
+    error = RuntimeError("DDS receive failure")
+    with patch.object(_Executor, "spin", side_effect=error):
+        with pytest.raises(RuntimeError, match="ROS executor failed.*DDS receive failure") as caught:
+            robot.connect()
+    assert caught.value.__cause__ is error
+    assert not robot.is_connected
+    assert robot._executor_thread is None
+    assert nodes[0].destroyed
+
+    robot.connect()
+    try:
+        assert robot.get_observation()[GRIPPER_KEY] == 0.04
+    finally:
+        robot.disconnect()
+
+
+def test_executor_unexpected_exit_during_connect_is_reported(tmp_path, ros_mocks):
+    robot = _make_robot(tmp_path)
+    with patch.object(_Executor, "spin", return_value=None):
+        with pytest.raises(RuntimeError, match="ROS executor stopped"):
+            robot.connect()
+    assert not robot.is_connected
+    assert robot._executor_thread is None
+
+
+@pytest.mark.parametrize("control_mode", ["joint", "cartesian"])
+def test_executor_failure_stops_observation_and_actions_with_fresh_cached_state(tmp_path, ros_mocks, control_mode):
+    _, nodes = ros_mocks
+    error = RuntimeError("DDS receive failure")
+    original_spin = _Executor.spin
+
+    def fail_after_initial_state(executor):
+        original_spin(executor)
+        raise error
+
+    robot = _make_robot(tmp_path, control_mode=control_mode)
+    with patch.object(_Executor, "spin", fail_after_initial_state):
+        robot.connect()
+        try:
+            observation = robot.get_observation()
+            action = {key: observation[key] for key in robot.action_features}
+            robot._context.stop.set()
+            robot._executor_thread.join(timeout=1.0)
+            assert not robot._executor_thread.is_alive()
+            with pytest.raises(RuntimeError, match="ROS executor failed.*DDS receive failure") as caught:
+                robot.get_observation()
+            assert caught.value.__cause__ is error
+            with pytest.raises(RuntimeError, match="ROS executor failed"):
+                robot.send_action(action)
+            assert all(not publisher.messages for _, _, publisher in nodes[0].publishers.values())
+        finally:
+            robot.disconnect()
+
+
+def test_executor_shutdown_exception_is_not_reported_as_failure(tmp_path, ros_mocks):
+    original_spin = _Executor.spin
+
+    def exit_on_shutdown(executor):
+        original_spin(executor)
+        raise RuntimeError("context shut down")
+
+    robot = _make_robot(tmp_path)
+    with patch.object(_Executor, "spin", exit_on_shutdown):
+        robot.connect()
+        robot.disconnect()
+    assert robot._executor_error is None
